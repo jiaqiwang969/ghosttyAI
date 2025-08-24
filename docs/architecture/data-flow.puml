@@ -1,0 +1,124 @@
+@startuml data-flow
+!theme plain
+title Data Flow Diagram
+
+skinparam actorStyle awesome
+skinparam defaultTextAlignment center
+
+actor User
+participant "Ghostty Input" as GInput
+participant "FFI Bridge" as FFI
+participant "tmux Core" as TMux
+participant "PTY/Shell" as PTY
+participant "Screen Writer" as SWrite
+participant "UI Backend" as UIBack
+participant "Callback Router" as CBack
+participant "Grid Mapper" as GMap
+participant "Terminal Buffer" as TBuf
+participant "GPU Renderer" as GPU
+participant "Display" as Display
+
+== Input Flow ==
+
+User -> GInput : Keyboard/Mouse
+activate GInput
+GInput -> GInput : Process modifiers\nand special keys
+GInput -> FFI : InputEvent
+deactivate GInput
+
+activate FFI
+FFI -> FFI : Convert to\ntmc_key_event
+FFI -> TMux : tmc_send_keys()
+deactivate FFI
+
+activate TMux
+TMux -> TMux : Input parsing\nand command processing
+TMux -> PTY : Write to PTY
+deactivate TMux
+
+activate PTY
+PTY -> PTY : Process executes
+PTY -> TMux : Output data
+deactivate PTY
+
+== Output Flow ==
+
+activate TMux
+TMux -> SWrite : screen_write_*()
+deactivate TMux
+
+activate SWrite
+SWrite -> SWrite : Update grid\nand attributes
+SWrite -> UIBack : tty_write(tty_cmd_*)
+deactivate SWrite
+
+activate UIBack
+UIBack -> UIBack : Aggregate cells\ninto spans
+UIBack -> CBack : on_grid_update()
+deactivate UIBack
+
+activate CBack
+CBack -> GMap : ProcessUpdate()
+deactivate CBack
+
+activate GMap
+GMap -> GMap : Convert tmux cells\nto Ghostty format
+GMap -> TBuf : UpdateCells()
+deactivate GMap
+
+activate TBuf
+TBuf -> TBuf : Mark dirty regions
+TBuf -> GPU : RenderFrame()
+deactivate TBuf
+
+activate GPU
+GPU -> GPU : Composite layers\nand effects
+GPU -> Display : Present()
+deactivate GPU
+
+Display -> User : Visual output
+
+== Layout Change Flow ==
+
+TMux -> UIBack : Layout change
+activate UIBack
+UIBack -> CBack : on_layout_change()
+deactivate UIBack
+
+activate CBack
+CBack -> GMap : UpdateLayout()
+deactivate CBack
+
+activate GMap
+GMap -> TBuf : ReconfigurePanes()
+deactivate GMap
+
+== Copy Mode Flow ==
+
+User -> GInput : Enter copy mode
+GInput -> FFI : CopyModeCommand
+FFI -> TMux : tmc_command("copy-mode")
+
+TMux -> UIBack : Copy mode state
+activate UIBack
+UIBack -> CBack : on_copy_mode()
+deactivate UIBack
+
+activate CBack
+CBack -> TBuf : SetSelectionMode()
+deactivate CBack
+
+note over UIBack
+  **Key Optimization**
+  Batches updates per frame
+  Coalesces adjacent cells
+end note
+
+note over GMap
+  **Format Conversion**
+  - Unicode normalization
+  - Color space mapping
+  - Attribute translation
+end note
+
+@enduml

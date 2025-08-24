@@ -1,0 +1,96 @@
+@startuml deployment-diagram
+!theme plain
+title Runtime Deployment Architecture
+
+skinparam defaultTextAlignment center
+skinparam nodeStyle rectangle
+
+node "Ghostty Process" {
+    component [Ghostty App] as App #LightBlue
+    component [UI Thread] as UIThread #LightBlue
+    component [Render Thread] as RenderThread #LightBlue
+    
+    package "libtmuxcore.so" {
+        component [tmux Server] as Server #LightYellow
+        component [Session Manager] as SessionMgr #LightYellow
+        component [Grid Buffers] as Grids #LightYellow
+    }
+    
+    component [FFI Bridge] as Bridge #LightGreen
+    component [Event Loop] as Loop #LightGreen
+    
+    database "Shared Memory" as SHM {
+        storage "Grid Data" as GridData
+        storage "Layout Info" as LayoutInfo
+    }
+}
+
+node "Child Processes" {
+    component [Shell 1] as Shell1 #Pink
+    component [Shell 2] as Shell2 #Pink
+    component [vim] as Vim #Pink
+}
+
+node "GPU" {
+    component [Metal/OpenGL] as GPULib #Cyan
+    component [Frame Buffer] as FB #Cyan
+}
+
+node "File System" {
+    folder "Config" {
+        file ".tmux.conf" as TmuxConf
+        file "ghostty.conf" as GhosttyConf
+    }
+    
+    folder "Runtime" {
+        file "tmux.socket" as Socket
+        file "crash.log" as Log
+    }
+}
+
+' Connections
+App --> UIThread : Main Thread
+App --> RenderThread : Spawn
+UIThread --> Bridge : Commands
+Bridge --> Server : C API Calls
+Server --> SessionMgr : Manage
+SessionMgr --> Grids : Update
+
+Server --> Loop : Events
+Loop --> UIThread : Callbacks
+
+Grids --> SHM : Write
+Bridge --> SHM : Read
+SHM --> RenderThread : Read
+
+RenderThread --> GPULib : Draw Calls
+GPULib --> FB : Render
+
+Server -.-> Shell1 : PTY
+Server -.-> Shell2 : PTY
+Server -.-> Vim : PTY
+
+App --> TmuxConf : Load
+App --> GhosttyConf : Load
+Server --> Socket : Listen
+Server --> Log : Errors
+
+note right of SHM
+  Zero-copy grid updates
+  via shared memory
+end note
+
+note bottom of Bridge
+  Thread-safe FFI layer
+  marshaling callbacks
+end note
+
+cloud "External Connections" {
+    component [SSH Server] as SSH
+    component [tmux Client] as TClient
+}
+
+Socket ..> TClient : Connect
+App ..> SSH : Remote
+
+@enduml

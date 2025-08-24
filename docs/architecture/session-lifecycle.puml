@@ -1,0 +1,73 @@
+@startuml session-lifecycle
+!theme plain
+title Session Lifecycle State Diagram
+
+skinparam defaultTextAlignment center
+
+[*] --> Uninitialized
+
+Uninitialized --> Initializing : tmc_server_new()
+Initializing --> Ready : Success
+Initializing --> Failed : Error
+
+Ready --> CreatingSession : tmc_client_attach()
+CreatingSession --> SessionActive : Success
+CreatingSession --> Ready : Failed
+
+SessionActive --> ProcessingInput : User Input
+ProcessingInput --> SessionActive : Processed
+
+SessionActive --> UpdatingGrid : PTY Output
+UpdatingGrid --> SessionActive : Rendered
+
+SessionActive --> ResizingWindow : Window Resize
+ResizingWindow --> SessionActive : Resized
+
+SessionActive --> EnteringCopyMode : Copy Mode Command
+EnteringCopyMode --> CopyModeActive : Entered
+
+CopyModeActive --> SelectingText : Mouse/Keyboard
+SelectingText --> CopyModeActive : Updated
+
+CopyModeActive --> SessionActive : Exit Copy Mode
+
+SessionActive --> SplittingPane : Split Command
+SplittingPane --> SessionActive : Split Complete
+
+SessionActive --> ClosingPane : Close Pane
+ClosingPane --> SessionActive : Pane Closed
+ClosingPane --> SessionEnding : Last Pane
+
+SessionActive --> Detaching : tmc_client_detach()
+Detaching --> Ready : Detached
+
+SessionEnding --> Cleanup : Resources Released
+Cleanup --> Ready : Session Removed
+
+Ready --> Shutdown : tmc_server_free()
+Shutdown --> [*]
+
+Failed --> [*]
+
+note right of SessionActive
+  Main operational state
+  handling all user interactions
+end note
+
+note left of CopyModeActive
+  Special state for
+  text selection
+end note
+
+state ProcessStates {
+    [*] --> Starting
+    Starting --> Running : Spawn Success
+    Starting --> Failed : Spawn Failed
+    Running --> Exiting : Process Exit
+    Exiting --> Zombie : Wait for Reap
+    Zombie --> [*] : Reaped
+}
+
+SessionActive --> ProcessStates : Per Pane
+
+@enduml

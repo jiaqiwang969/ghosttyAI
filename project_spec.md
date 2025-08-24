@@ -2,6 +2,10 @@ PROJECT: Ghostty × tmux（libtmuxcore）完全内嵌集成
 
 GOAL: 将 tmux 核心以内嵌库 libtmuxcore 的形式嵌入 Ghostty，弃用 VT/TTY 输出，改用结构化网格与事件回调驱动 Ghostty 渲染与输入，同时保持 tmux 语义与性能优势。
 
+项目绝对路径：/Users/jqwang/98-ghosttyAI/
+tmux 源代码目录： /Users/jqwang/98-ghosttyAI/tmux
+ghostty 源代码目录：/Users/jqwang/98-ghosttyAI/ghostty
+
 CONSTRAINTS:
 	•	复用现有源码（tmux: C；Ghostty: Zig），最小侵入改动（主要集中在 tty_write 输出链与事件循环接入）。
 	•	保持 tmux 语义/命令/选项与现有行为一致；可同时构建传统 tmux 可执行文件。

@@ -1,0 +1,85 @@
+@startuml event-loop-integration
+!theme plain
+title Event Loop Integration
+
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+package "Ghostty Event Loop" {
+    component [Main RunLoop] as MainLoop #LightBlue
+    component [Timer Manager] as TimerMgr #LightBlue
+    component [FD Monitor] as FDMon #LightBlue
+    component [Task Queue] as TaskQ #LightBlue
+}
+
+package "Event Loop Adapter" {
+    component [Loop VTable] as LoopVT #LightGreen
+    database "Handle Map" as HandleMap #LightGreen
+    component [Callback Wrapper] as CBWrap #LightGreen
+}
+
+package "libtmuxcore Events" {
+    component [libevent Core] as LibEvent #LightYellow
+    component [FD Events] as FDEvents #LightYellow
+    component [Timer Events] as TimerEvents #LightYellow
+    component [Signal Events] as SigEvents #LightYellow
+}
+
+component "tmc_loop_vtable" as VTable #LightCoral {
+    note right
+        add_fd()
+        mod_fd()
+        del_fd()
+        add_timer()
+        del_timer()
+        post()
+    end note
+}
+
+' VTable implementation
+LoopVT -up-> VTable : implements
+
+' Ghostty integration
+MainLoop --> TaskQ : Schedule
+TaskQ --> CBWrap : Execute
+FDMon --> CBWrap : FD Ready
+TimerMgr --> CBWrap : Timer Fired
+
+' tmux integration
+LibEvent --> LoopVT : Register Events
+LoopVT --> HandleMap : Store Mapping
+LoopVT --> FDMon : Monitor FD
+LoopVT --> TimerMgr : Schedule Timer
+LoopVT --> TaskQ : Post Task
+
+FDEvents --> LibEvent : Request
+TimerEvents --> LibEvent : Request
+SigEvents --> LibEvent : Request
+
+CBWrap --> LibEvent : Invoke Callback
+
+note right of VTable
+  **Key Abstraction**
+  Allows tmux to use
+  Ghostty's event loop
+  instead of libevent
+end note
+
+note bottom of HandleMap
+  Maps tmux handles to
+  Ghostty event sources
+end note
+
+package "Event Flow Examples" {
+    usecase "PTY Read" as UC1
+    usecase "Window Resize" as UC2
+    usecase "Timer Tick" as UC3
+    usecase "User Input" as UC4
+}
+
+UC1 ..> FDMon : triggers
+UC2 ..> TaskQ : posts
+UC3 ..> TimerMgr : fires
+UC4 ..> TaskQ : queues
+
+@enduml
