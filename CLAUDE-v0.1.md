@@ -1,5 +1,31 @@
 # CLAUDE-v0.1.md - Ghostty × tmux Integration Agent Orchestration Handbook
 
+## 📍 CRITICAL NAVIGATION - START HERE
+**All agents MUST read this first**: `/docs/README-目录说明.md`
+- Complete documentation structure explanation
+- Where to find YOUR specific tasks
+- How different document types connect
+- Daily workflow guidance
+
+### 🗺️ Agent Navigation Flowchart
+```
+START HERE
+    ↓
+[1] Read /docs/README-目录说明.md (5 min)
+    ↓
+[2] Check your role in Agent Hierarchy below
+    ↓
+[3] Go to /docs/任务清单/第一周/[YOUR-ROLE].md
+    ↓
+[4] Set up cache/week1/[YOUR-ROLE]/ workspace
+    ↓
+[5] Review /docs/architecture-view/ for your component
+    ↓
+[6] Follow /docs/new-architecture-施工图/ for implementation
+    ↓
+[7] Daily: Report to PM via cache/week1/[ROLE]/daily-reports/
+```
+
 ## 🎯 Project Overview
 The Ghostty × tmux Integration project aims to compile tmux as a library (libtmuxcore) and embed it directly into Ghostty, replacing VT/TTY output with structured callbacks and event-driven rendering.
 
@@ -82,6 +108,31 @@ The Ghostty × tmux Integration project aims to compile tmux as a library (libtm
 - **Assigned To**: QA-001, QA-002 tasks
 - **Location**: `ghostty-quality` session
 
+## 📚 Documentation Quick Reference
+
+### Essential Documents for Each Agent
+
+| Agent Type | Primary Task Doc | Architecture Ref | Implementation Guide |
+|------------|-----------------|------------------|---------------------|
+| **c-tmux-specialist** | `/docs/任务清单/第一周/CORE-001.md` | `/docs/architecture-view/tty-write-interception.md` | `/docs/new-architecture-施工图/technical-implementation-guide.md` |
+| **libtmux-core-developer** | `/docs/任务清单/第一周/CORE-002.md` | `/docs/architecture-view/integration-architecture.md` | `/docs/new-architecture-施工图/implementation-flow.puml` |
+| **zig-ghostty-integration** | `/docs/任务清单/第一周/INTG-001.md` | `/docs/architecture-view/callback-sequences.puml` | `/docs/new-architecture-施工图/data-flow-with-tasks.puml` |
+| **qa-test-engineer** | `/docs/任务清单/第一周/QA-002.md` | `/docs/architecture-view/frame-batching.md` | Cache validation checklist |
+| **system-architect** | `/docs/任务清单/第一周/ARCH-001.md` | All `/docs/architecture-view/` | Design review criteria |
+| **devops-engineer-ops001** | `/docs/任务清单/第一周/OPS-001.md` | `/docs/architecture-view/deployment-diagram.puml` | Makefile targets |
+
+### Daily Workflow Documents
+1. **Morning**: Check `/docs/任务清单/第一周/[YOUR-ROLE].md`
+2. **Planning**: Review `/docs/任务清单/第一周/协作计划.md` for handoffs
+3. **Status**: Update `/docs/project-manager-view/task-ownership-week1.puml`
+4. **EOD**: Submit report to `cache/week1/[ROLE]/daily-reports/`
+
+### Critical Paths
+- **Task Assignments**: `/docs/任务清单/第一周/` → Your specific role file
+- **Technical Understanding**: `/docs/architecture-view/` → Component you're working on
+- **How to Build**: `/docs/new-architecture-施工图/` → Step-by-step implementation
+- **Who Owns What**: `/docs/project-manager-view/` → Responsibility matrix
+
 ## 📊 Communication Flow
 
 ### Hub-and-Spoke Model v2.0
@@ -153,6 +204,32 @@ tmux-orchestrator:
 ```
 
 ## 📋 Agent Deployment Protocol
+
+### 🚀 QUICK START FOR NEW AGENTS
+
+**Step 1: Read Documentation Overview**
+```bash
+cat /docs/README-目录说明.md  # Understand entire doc structure
+```
+
+**Step 2: Find Your Task**
+```bash
+cat /docs/任务清单/第一周/[YOUR-ROLE].md  # Get your specific tasks
+```
+
+**Step 3: Set Up Workspace**
+```bash
+cd cache/week1/[YOUR-ROLE]/  # Your working directory
+mkdir -p tests wip daily-reports handoffs
+```
+
+**Step 4: Begin TDD Cycle**
+```bash
+# Write test first
+vim cache/week1/[YOUR-ROLE]/tests/test_[feature].c
+# Then implement
+vim cache/week1/[YOUR-ROLE]/wip/[feature].c
+```
 
 ### Starting a Specialized Agent
 
