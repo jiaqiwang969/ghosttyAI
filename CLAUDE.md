@@ -66,40 +66,65 @@ The Ghostty × tmux Integration project aims to compile tmux as a library (libtm
 
 ## 🏗️ Agent System Architecture
 
-### Corrected Agent Hierarchy
+### Updated Agent Hierarchy - All 9 Agents at Same Level
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    ORCHESTRATOR (You)                        │
 │                 Strategic oversight & coordination           │
-└──────────────┬──────────────────────────┬───────────────────┘
-               │                          │
-    ┌──────────▼────────────┐  ┌─────────▼──────────┐
-    │  INDEPENDENT AGENTS   │  │  PROJECT MANAGER   │
-    │   (Consultative)      │  │  (Execution Lead)  │
-    └───────────────────────┘  └────────────────────┘
-               │                          │
-    ┌──────────┴──────────┐              │
-    │                     │              │
-┌───▼─────────┐ ┌────────▼──────┐        │
-│  ARCHITECT  │ │    DEVOPS     │        │
-│  CONSULTANT │ │   CONSULTANT  │        │
-└─────────────┘ └───────────────┘        │
-                                          │
-              ┌───────────────────────────┴──────────────────────────┐
-              │                  TASK TEAMS                          │
-              │            (Report to PM Only)                       │
-              └───────────────────────────────────────────────────────┘
-                                    │
-    ┌───────────┬───────────┬──────┴──────┬────────────┬────────────┐
-    │           │           │              │            │            │
-┌───▼────┐ ┌───▼────┐ ┌────▼────┐ ┌──────▼─────┐ ┌───▼────┐ ┌─────▼──────┐
-│ CORE    │ │ INTG   │ │  QA     │ │   SYSTEM   │ │  C/    │ │    ZIG     │
-│ TEAMS   │ │ TEAMS  │ │  TEAMS  │ │ ARCHITECT  │ │  TMUX  │ │ INTEGRATION│
-└─────────┘ └────────┘ └─────────┘ └────────────┘ └────────┘ └────────────┘
+└─────────────────────┬────────────────────────────────────────┘
+                      │
+          ┌───────────┴────────────┐
+          │   PROJECT MANAGER       │
+          │  (Execution Authority)  │
+          └───────────┬────────────┘
+                      │
+    ┌─────────────────┴──────────────────────────────────────────────┐
+    │                 ALL 9 AGENTS (Same Directory Level)            │
+    │         .claude/agents/ directory - all at same level          │
+    └─────────────────────────────────────────────────────────────────┘
+                      │
+    ┌─────────────────┴──────────────────────────────────────────────┐
+    │                                                                 │
+    │  7 Managed Agents (Report to PM):    2 Independent Agents:     │
+    │  ├── c-tmux-specialist.md           ├── system-architect.md    │
+    │  ├── libtmux-core-developer.md      └── devops-engineer-ops001.md
+    │  ├── zig-ghostty-integration.md                                │
+    │  ├── integration-dev.md                                        │
+    │  ├── performance-eng.md                                        │
+    │  ├── qa-test-lead.md                                          │
+    │  └── qa-test-engineer.md                                       │
+    └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Specialized Agent Roles (Created)
+### Specialized Agent Roles (All 9 Agents - Same Directory Level)
+
+| Agent File | Role | Type | Session Location | Reports To |
+|------------|------|------|------------------|------------|
+| **c-tmux-specialist.md** | CORE-001 - tmux hooks extraction | Managed | ghostty-core:0 | PM |
+| **libtmux-core-developer.md** | CORE-002 - Library development | Managed | ghostty-core:4 | PM |
+| **zig-ghostty-integration.md** | INTG-001 - FFI bridge | Managed | ghostty-integration:0 | PM |
+| **integration-dev.md** | INTG-002 - Integration support | Managed | ghostty-integration:4 | PM |
+| **performance-eng.md** | INTG-003 - Performance optimization | Managed | ghostty-integration:5 | PM |
+| **qa-test-lead.md** | QA-001 - Test strategy | Managed | ghostty-quality:0 | PM |
+| **qa-test-engineer.md** | QA-002 - Test execution | Managed | ghostty-quality:1 | PM |
+| **system-architect.md** | ARCH-001 - Design consultation | Independent | ghostty-tmux-architect:0 | Self |
+| **devops-engineer-ops001.md** | OPS-001 - Build & deployment | Independent | ghostty-devops:0 | Self |
+
+**Directory Structure Reality**:
+```
+.claude/agents/                       # All agents at same level
+├── c-tmux-specialist.md             # Same directory level
+├── devops-engineer-ops001.md        # Same directory level
+├── integration-dev.md               # Same directory level
+├── libtmux-core-developer.md        # Same directory level
+├── performance-eng.md               # Same directory level
+├── qa-test-engineer.md              # Same directory level
+├── qa-test-lead.md                  # Same directory level
+├── system-architect.md              # Same directory level
+├── tmux-project-manager.md          # Same directory level
+└── zig-ghostty-integration.md       # Same directory level
+```
 
 #### 1. **c-tmux-specialist** 
 - **Purpose**: C-based tmux integration and terminal multiplexer functionality
