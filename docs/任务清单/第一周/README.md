@@ -25,7 +25,7 @@
 | QA-001 | 测试主管 | 测试计划和集成测试 | 3天 |
 | QA-002 | 测试工程师 | 网格操作测试 | 2天 |
 | OPS-001 | DevOps工程师 | 构建系统设置 | 2天 |
-
+claude --dangerously-skip-permissions
 ### 依赖关系 (Dependencies)
 ```
 T-102 (ARCH-001) → T-101 (CORE-001) → T-103 (CORE-002)

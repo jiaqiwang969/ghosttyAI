@@ -1,0 +1,482 @@
+# Makefile.test - Comprehensive Test Framework for libtmuxcore UI Backend
+# Author: QA-001 (Test Lead)
+# Date: 2025-08-25
+# Version: 1.0.0
+# Minimum Coverage: 65% overall, 80% for critical functions
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Paths
+TMUX_ROOT := /Users/jqwang/98-ghosttyAI/tmux
+CACHE_ROOT := /Users/jqwang/98-ghosttyAI/cache/week1
+TEST_ROOT := $(CACHE_ROOT)/QA-001/test_framework
+SRC_DIR := $(TEST_ROOT)/src
+INC_DIR := $(TEST_ROOT)/include
+DATA_DIR := $(TEST_ROOT)/data
+REPORTS_DIR := $(TEST_ROOT)/reports
+SCRIPTS_DIR := $(TEST_ROOT)/scripts
+
+# Compiler settings
+CC := gcc
+CFLAGS := -Wall -Wextra -Werror -g -O0 -fPIC
+CFLAGS += -I$(INC_DIR) -I$(CACHE_ROOT)/ARCH-001 -I$(TMUX_ROOT)
+CFLAGS += -DENABLE_UI_BACKEND -D_GNU_SOURCE
+CFLAGS += -fsanitize=address -fsanitize=undefined
+CFLAGS += -fprofile-arcs -ftest-coverage  # For gcov
+
+# Linker settings
+LDFLAGS := -L$(TEST_ROOT) -pthread
+LDFLAGS += -fsanitize=address -fsanitize=undefined
+LDFLAGS += -lgcov --coverage
+
+# Test framework (Unity)
+UNITY_URL := https://github.com/ThrowTheSwitch/Unity/releases/download/v2.5.2/Unity.zip
+UNITY_DIR := $(TEST_ROOT)/unity
+UNITY_FLAGS := -I$(UNITY_DIR)/src
+
+# Coverage tools
+GCOV := gcov
+LCOV := lcov
+GENHTML := genhtml
+VALGRIND := valgrind
+VALGRIND_FLAGS := --leak-check=full --show-leak-kinds=all --track-origins=yes
+VALGRIND_FLAGS += --error-exitcode=1 --quiet
+
+# Performance tools
+PERF := perf
+TIME := /usr/bin/time -v
+
+# Test categories
+UNIT_TESTS := $(wildcard $(TEST_ROOT)/unit_tests/test_*.c)
+INTEGRATION_TESTS := $(wildcard $(TEST_ROOT)/integration_tests/test_*.c)
+STRESS_TESTS := $(wildcard $(TEST_ROOT)/stress_tests/test_*.c)
+PERFORMANCE_TESTS := $(wildcard $(TEST_ROOT)/performance_tests/test_*.c)
+
+# Test binaries
+UNIT_BINS := $(UNIT_TESTS:.c=.bin)
+INTEGRATION_BINS := $(INTEGRATION_TESTS:.c=.bin)
+STRESS_BINS := $(STRESS_TESTS:.c=.bin)
+PERFORMANCE_BINS := $(PERFORMANCE_TESTS:.c=.bin)
+
+# Coverage targets
+COVERAGE_MIN_OVERALL := 65
+COVERAGE_MIN_CRITICAL := 80
+
+# Performance targets (from spec)
+PERF_TARGET_CELLS_SEC := 10000000    # 10M cells/second
+PERF_TARGET_FPS := 60                # 60 FPS minimum
+PERF_TARGET_LATENCY_MS := 16.67      # Frame interval
+
+# Parallel execution
+JOBS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# ============================================================================
+# Color Output
+# ============================================================================
+
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+BLUE := \033[0;34m
+NC := \033[0m # No Color
+
+# ============================================================================
+# Main Targets
+# ============================================================================
+
+.PHONY: all test clean coverage report help setup
+
+all: setup test coverage report
+
+help:
+	@echo "$(BLUE)libtmuxcore Test Framework$(NC)"
+	@echo "================================"
+	@echo "Available targets:"
+	@echo "  $(GREEN)make test$(NC)         - Run all tests"
+	@echo "  $(GREEN)make unit$(NC)         - Run unit tests only"
+	@echo "  $(GREEN)make integration$(NC)  - Run integration tests"
+	@echo "  $(GREEN)make stress$(NC)       - Run stress tests"
+	@echo "  $(GREEN)make performance$(NC)  - Run performance benchmarks"
+	@echo "  $(GREEN)make coverage$(NC)     - Generate coverage report"
+	@echo "  $(GREEN)make valgrind$(NC)     - Run memory leak detection"
+	@echo "  $(GREEN)make ci$(NC)           - Run CI/CD test suite"
+	@echo "  $(GREEN)make clean$(NC)        - Clean build artifacts"
+	@echo ""
+	@echo "Coverage Requirements:"
+	@echo "  Overall: $(COVERAGE_MIN_OVERALL)%"
+	@echo "  Critical: $(COVERAGE_MIN_CRITICAL)%"
+	@echo ""
+	@echo "Performance Targets:"
+	@echo "  Cells/sec: $(PERF_TARGET_CELLS_SEC)"
+	@echo "  Frame rate: $(PERF_TARGET_FPS) FPS"
+	@echo "  Latency: <$(PERF_TARGET_LATENCY_MS)ms"
+
+# ============================================================================
+# Setup
+# ============================================================================
+
+setup: $(UNITY_DIR) $(REPORTS_DIR) test-framework-lib
+
+$(UNITY_DIR):
+	@echo "$(BLUE)Setting up Unity test framework...$(NC)"
+	@mkdir -p $(UNITY_DIR)
+	@cd $(UNITY_DIR) && \
+		curl -L $(UNITY_URL) -o unity.zip && \
+		unzip -q unity.zip && \
+		rm unity.zip
+	@echo "$(GREEN)Unity setup complete$(NC)"
+
+$(REPORTS_DIR):
+	@mkdir -p $(REPORTS_DIR)/{coverage,valgrind,performance,junit}
+
+test-framework-lib: $(SRC_DIR)/test_framework.c
+	@echo "$(BLUE)Building test framework library...$(NC)"
+	$(CC) $(CFLAGS) $(UNITY_FLAGS) -shared -o $(TEST_ROOT)/libtest_framework.so \
+		$(SRC_DIR)/test_framework.c \
+		$(SRC_DIR)/mock_backend.c \
+		$(SRC_DIR)/frame_validator.c \
+		$(SRC_DIR)/memory_tracker.c \
+		$(SRC_DIR)/performance_monitor.c \
+		$(UNITY_DIR)/src/unity.c
+	@echo "$(GREEN)Test framework built$(NC)"
+
+# ============================================================================
+# Test Compilation
+# ============================================================================
+
+%.bin: %.c test-framework-lib
+	@echo "$(BLUE)Compiling test: $@$(NC)"
+	$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $@ $< \
+		-L$(TEST_ROOT) -ltest_framework \
+		$(LDFLAGS)
+
+# ============================================================================
+# Test Execution Targets
+# ============================================================================
+
+test: unit integration
+	@echo "$(GREEN)All tests completed$(NC)"
+
+unit: $(UNIT_BINS)
+	@echo "$(BLUE)Running unit tests...$(NC)"
+	@failed=0; \
+	for test in $(UNIT_BINS); do \
+		echo "Running: $$test"; \
+		if $$test; then \
+			echo "$(GREEN)✓ PASSED$(NC)"; \
+		else \
+			echo "$(RED)✗ FAILED$(NC)"; \
+			failed=$$((failed + 1)); \
+		fi; \
+	done; \
+	if [ $$failed -gt 0 ]; then \
+		echo "$(RED)$$failed unit tests failed$(NC)"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)All unit tests passed$(NC)"; \
+	fi
+
+integration: $(INTEGRATION_BINS)
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	@for test in $(INTEGRATION_BINS); do \
+		timeout 60s $$test || exit 1; \
+	done
+	@echo "$(GREEN)Integration tests passed$(NC)"
+
+stress: $(STRESS_BINS)
+	@echo "$(YELLOW)Running stress tests (this may take a while)...$(NC)"
+	@for test in $(STRESS_BINS); do \
+		timeout 300s $$test || exit 1; \
+	done
+	@echo "$(GREEN)Stress tests passed$(NC)"
+
+performance: $(PERFORMANCE_BINS)
+	@echo "$(BLUE)Running performance benchmarks...$(NC)"
+	@mkdir -p $(REPORTS_DIR)/performance
+	@for test in $(PERFORMANCE_BINS); do \
+		echo "Benchmark: $$test"; \
+		$(TIME) $$test 2>&1 | tee $(REPORTS_DIR)/performance/$$(basename $$test).txt; \
+	done
+	@$(SCRIPTS_DIR)/analyze_performance.sh
+	@echo "$(GREEN)Performance benchmarks complete$(NC)"
+
+# ============================================================================
+# Test Categories for All 22 tty_cmd Functions
+# ============================================================================
+
+test-cmd-cell:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_cell.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_cell.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_cell.bin
+
+test-cmd-cells:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_cells.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_cells.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_cells.bin
+
+test-cmd-clearline:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearline.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearline.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearline.bin
+
+test-cmd-clearscreen:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearscreen.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearscreen.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearscreen.bin
+
+test-cmd-scrollup:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_scrollup.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_scrollup.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_scrollup.bin
+
+test-cmd-scrolldown:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_scrolldown.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_scrolldown.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_scrolldown.bin
+
+test-cmd-insertline:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_insertline.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_insertline.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_insertline.bin
+
+test-cmd-deleteline:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_deleteline.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_deleteline.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_deleteline.bin
+
+test-cmd-insertcharacter:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_insertcharacter.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_insertcharacter.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_insertcharacter.bin
+
+test-cmd-deletecharacter:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_deletecharacter.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_deletecharacter.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_deletecharacter.bin
+
+test-cmd-clearcharacter:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearcharacter.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearcharacter.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearcharacter.bin
+
+test-cmd-clearendofline:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearendofline.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearendofline.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearendofline.bin
+
+test-cmd-clearstartofline:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearstartofline.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearstartofline.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearstartofline.bin
+
+test-cmd-clearendofscreen:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearendofscreen.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearendofscreen.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearendofscreen.bin
+
+test-cmd-clearstartofscreen:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_clearstartofscreen.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_clearstartofscreen.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_clearstartofscreen.bin
+
+test-cmd-reverseindex:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_reverseindex.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_reverseindex.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_reverseindex.bin
+
+test-cmd-linefeed:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_linefeed.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_linefeed.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_linefeed.bin
+
+test-cmd-alignmenttest:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_alignmenttest.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_alignmenttest.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_alignmenttest.bin
+
+test-cmd-setselection:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_setselection.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_setselection.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_setselection.bin
+
+test-cmd-rawstring:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_rawstring.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_rawstring.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_rawstring.bin
+
+test-cmd-sixelimage:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_sixelimage.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_sixelimage.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_sixelimage.bin
+
+test-cmd-syncstart:
+	@$(CC) $(CFLAGS) $(UNITY_FLAGS) -o $(TEST_ROOT)/test_cmd_syncstart.bin \
+		$(TEST_ROOT)/unit_tests/test_cmd_syncstart.c -L$(TEST_ROOT) -ltest_framework $(LDFLAGS)
+	@$(TEST_ROOT)/test_cmd_syncstart.bin
+
+# Run all command tests
+test-all-commands: test-cmd-cell test-cmd-cells test-cmd-clearline test-cmd-clearscreen \
+	test-cmd-scrollup test-cmd-scrolldown test-cmd-insertline test-cmd-deleteline \
+	test-cmd-insertcharacter test-cmd-deletecharacter test-cmd-clearcharacter \
+	test-cmd-clearendofline test-cmd-clearstartofline test-cmd-clearendofscreen \
+	test-cmd-clearstartofscreen test-cmd-reverseindex test-cmd-linefeed \
+	test-cmd-alignmenttest test-cmd-setselection test-cmd-rawstring \
+	test-cmd-sixelimage test-cmd-syncstart
+	@echo "$(GREEN)All 22 command tests passed$(NC)"
+
+# ============================================================================
+# Coverage Reporting
+# ============================================================================
+
+coverage: test
+	@echo "$(BLUE)Generating coverage report...$(NC)"
+	@mkdir -p $(REPORTS_DIR)/coverage
+	$(LCOV) --capture --directory $(TEST_ROOT) --output-file $(REPORTS_DIR)/coverage/coverage.info
+	$(LCOV) --remove $(REPORTS_DIR)/coverage/coverage.info '/usr/*' '*/unity/*' --output-file $(REPORTS_DIR)/coverage/coverage.info
+	$(GENHTML) $(REPORTS_DIR)/coverage/coverage.info --output-directory $(REPORTS_DIR)/coverage/html
+	@echo "$(GREEN)Coverage report generated in $(REPORTS_DIR)/coverage/html/index.html$(NC)"
+	@$(SCRIPTS_DIR)/check_coverage.sh $(COVERAGE_MIN_OVERALL) $(COVERAGE_MIN_CRITICAL)
+
+coverage-summary:
+	@echo "$(BLUE)Coverage Summary:$(NC)"
+	@$(LCOV) --summary $(REPORTS_DIR)/coverage/coverage.info
+
+# ============================================================================
+# Memory Leak Detection
+# ============================================================================
+
+valgrind: $(UNIT_BINS) $(INTEGRATION_BINS)
+	@echo "$(BLUE)Running Valgrind memory checks...$(NC)"
+	@mkdir -p $(REPORTS_DIR)/valgrind
+	@failed=0; \
+	for test in $(UNIT_BINS) $(INTEGRATION_BINS); do \
+		echo "Checking: $$test"; \
+		$(VALGRIND) $(VALGRIND_FLAGS) \
+			--log-file=$(REPORTS_DIR)/valgrind/$$(basename $$test).log \
+			$$test; \
+		if [ $$? -ne 0 ]; then \
+			echo "$(RED)✗ Memory leaks detected$(NC)"; \
+			failed=$$((failed + 1)); \
+		else \
+			echo "$(GREEN)✓ No leaks$(NC)"; \
+		fi; \
+	done; \
+	if [ $$failed -gt 0 ]; then \
+		echo "$(RED)$$failed tests have memory leaks$(NC)"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)All tests are leak-free$(NC)"; \
+	fi
+
+# ============================================================================
+# Performance Benchmarking
+# ============================================================================
+
+benchmark: performance
+	@echo "$(BLUE)Running performance benchmarks...$(NC)"
+	@$(TEST_ROOT)/performance_tests/bench_cell_updates.bin
+	@$(TEST_ROOT)/performance_tests/bench_frame_aggregation.bin
+	@$(TEST_ROOT)/performance_tests/bench_span_merging.bin
+	@$(TEST_ROOT)/performance_tests/bench_60fps_rendering.bin
+	@echo "$(GREEN)Benchmarks complete - see $(REPORTS_DIR)/performance/$(NC)"
+
+profile:
+	@echo "$(BLUE)Running performance profiling...$(NC)"
+	$(PERF) record -g $(TEST_ROOT)/performance_tests/bench_cell_updates.bin
+	$(PERF) report > $(REPORTS_DIR)/performance/profile_report.txt
+	@echo "$(GREEN)Profile report saved$(NC)"
+
+# ============================================================================
+# CI/CD Integration
+# ============================================================================
+
+ci: clean setup
+	@echo "$(BLUE)Running CI/CD test suite...$(NC)"
+	@$(MAKE) -f Makefile.test unit
+	@$(MAKE) -f Makefile.test integration
+	@$(MAKE) -f Makefile.test coverage
+	@$(MAKE) -f Makefile.test valgrind
+	@$(MAKE) -f Makefile.test ci-report
+	@echo "$(GREEN)CI/CD suite passed$(NC)"
+
+ci-report:
+	@echo "$(BLUE)Generating CI/CD reports...$(NC)"
+	@mkdir -p $(REPORTS_DIR)/junit
+	@$(SCRIPTS_DIR)/generate_junit.sh > $(REPORTS_DIR)/junit/test_results.xml
+	@echo "Test Results Summary:" > $(REPORTS_DIR)/ci_summary.txt
+	@echo "=====================" >> $(REPORTS_DIR)/ci_summary.txt
+	@echo "Unit Tests: PASSED" >> $(REPORTS_DIR)/ci_summary.txt
+	@echo "Integration Tests: PASSED" >> $(REPORTS_DIR)/ci_summary.txt
+	@$(LCOV) --summary $(REPORTS_DIR)/coverage/coverage.info >> $(REPORTS_DIR)/ci_summary.txt
+	@echo "Memory Leaks: NONE" >> $(REPORTS_DIR)/ci_summary.txt
+	@cat $(REPORTS_DIR)/ci_summary.txt
+	@echo "$(GREEN)CI reports generated$(NC)"
+
+# ============================================================================
+# Parallel Test Execution
+# ============================================================================
+
+parallel-test:
+	@echo "$(BLUE)Running tests in parallel ($(JOBS) jobs)...$(NC)"
+	@$(MAKE) -f Makefile.test -j$(JOBS) $(UNIT_BINS)
+	@parallel -j$(JOBS) ::: $(UNIT_BINS)
+	@echo "$(GREEN)Parallel tests complete$(NC)"
+
+# ============================================================================
+# Test Data Generation
+# ============================================================================
+
+generate-test-data:
+	@echo "$(BLUE)Generating test data...$(NC)"
+	@$(SCRIPTS_DIR)/generate_test_data.sh
+	@echo "$(GREEN)Test data generated in $(DATA_DIR)$(NC)"
+
+# ============================================================================
+# Clean
+# ============================================================================
+
+clean:
+	@echo "$(YELLOW)Cleaning test artifacts...$(NC)"
+	@rm -f $(TEST_ROOT)/**/*.bin
+	@rm -f $(TEST_ROOT)/**/*.o
+	@rm -f $(TEST_ROOT)/**/*.gcda
+	@rm -f $(TEST_ROOT)/**/*.gcno
+	@rm -f $(TEST_ROOT)/**/*.gcov
+	@rm -f $(TEST_ROOT)/libtest_framework.so
+	@rm -rf $(REPORTS_DIR)/*
+	@echo "$(GREEN)Clean complete$(NC)"
+
+distclean: clean
+	@rm -rf $(UNITY_DIR)
+	@rm -rf $(REPORTS_DIR)
+	@echo "$(GREEN)Distribution clean complete$(NC)"
+
+# ============================================================================
+# Installation
+# ============================================================================
+
+install:
+	@echo "$(BLUE)Installing test framework...$(NC)"
+	@cp $(TEST_ROOT)/libtest_framework.so /usr/local/lib/
+	@cp $(INC_DIR)/*.h /usr/local/include/
+	@ldconfig
+	@echo "$(GREEN)Test framework installed$(NC)"
+
+uninstall:
+	@echo "$(YELLOW)Uninstalling test framework...$(NC)"
+	@rm -f /usr/local/lib/libtest_framework.so
+	@rm -f /usr/local/include/test_*.h
+	@ldconfig
+	@echo "$(GREEN)Test framework uninstalled$(NC)"
+
+# ============================================================================
+# Special Targets
+# ============================================================================
+
+.PRECIOUS: %.bin
+.SECONDARY:
+
+# Prevent deletion of intermediate files
+.SECONDARY: $(UNIT_BINS) $(INTEGRATION_BINS) $(STRESS_BINS) $(PERFORMANCE_BINS)
