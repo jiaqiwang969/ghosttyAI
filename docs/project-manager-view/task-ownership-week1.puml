@@ -1,0 +1,132 @@
+@startuml task-ownership-v0.1
+!define PLANTUML_LIMIT_SIZE 32768
+skinparam dpi 300
+skinparam maxMessageSize 300
+
+!pragma layout elk
+!theme aws-orange
+skinparam linetype ortho
+skinparam packageStyle rectangle
+skinparam componentStyle uml2
+skinparam classFontColor black
+skinparam classAttributeFontColor black
+
+' Status color scheme
+skinparam class {
+  BackgroundColor<<Todo>> #FFF5F5
+  BorderColor<<Todo>> #FF6B6B
+  BackgroundColor<<Doing>> #FFF8E1
+  BorderColor<<Doing>> #FBC02D
+  BackgroundColor<<Blocked>> #FBE9E7
+  BorderColor<<Blocked>> #E64A19
+  BackgroundColor<<Done>> #E8F5E9
+  BorderColor<<Done>> #43A047
+  BackgroundColor<<Review>> #E3F2FD
+  BorderColor<<Review>> #1976D2
+}
+
+' Enhanced Task card macro with owner details
+!define Task($id,$title,$owner,$ownerRole,$status,$est) class "$id: $title" as $id <<$status>>
+
+title Week 1: UI Backend Foundation - Task Ownership\n<size:14><color:#2E86AB>Clear ownership and accountability for each task</color></size>
+
+' Week 1 Tasks with specific owners
+Task(T101, "Extract tty_write hooks", "CORE-001", "Sr. C Dev", "Todo", "2")
+T101 : <b>Owner:</b> CORE-001 (Sr. C Dev)
+T101 : <b>Est:</b> 2 days
+T101 : <b>Skills:</b> Deep tmux internals, C
+T101 : --
+T101 : <b>Inputs:</b> tty.c, tty-term.c
+T101 : <b>Outputs:</b> ui_backend.h
+T101 : --
+T101 : ✓ All tty_cmd_* identified
+T101 : ✓ Vtable covers 100% cmds
+T101 : ✓ Compiles with stub backend
+
+Task(T102, "Design UI backend abstraction", "ARCH-001", "Lead Architect", "Todo", "1")
+T102 : <b>Owner:</b> ARCH-001 (Lead Architect)
+T102 : <b>Est:</b> 1 day
+T102 : <b>Skills:</b> System design, C ABI
+T102 : --
+T102 : <b>Inputs:</b> ui_backend.h, tty.c
+T102 : <b>Outputs:</b> ui_backend_spec.md
+T102 : --
+T102 : ✓ Clean separation
+T102 : ✓ Multiple backends
+T102 : ✓ Zero-copy design
+
+Task(T103, "Implement backend router", "CORE-002", "C Developer", "Todo", "3")
+T103 : <b>Owner:</b> CORE-002 (C Developer)
+T103 : <b>Est:</b> 3 days
+T103 : <b>Skills:</b> C, tmux codebase
+T103 : --
+T103 : <b>Inputs:</b> ui_backend.h, tty.c
+T103 : <b>Outputs:</b> backend_router.c
+T103 : --
+T103 : ✓ TTY backend preserved
+T103 : ✓ Runtime config switch
+T103 : ✓ No perf regression
+
+Task(T104, "Create Ghostty backend stub", "INTG-001", "Sr. Zig Dev", "Todo", "2")
+T104 : <b>Owner:</b> INTG-001 (Sr. Zig Dev)
+T104 : <b>Est:</b> 2 days
+T104 : <b>Skills:</b> C callbacks, optimization
+T104 : --
+T104 : <b>Inputs:</b> ui_backend.h, grid.c
+T104 : <b>Outputs:</b> backend_ghostty.c
+T104 : --
+T104 : ✓ Spans merged per row
+T104 : ✓ Dirty regions tracked
+T104 : ✓ Callback ≤ 1 per frame
+
+Task(T105, "Grid operation test suite", "QA-002", "Test Engineer", "Todo", "2")
+T105 : <b>Owner:</b> QA-002 (Test Engineer)
+T105 : <b>Est:</b> 2 days
+T105 : <b>Skills:</b> Terminal protocols, testing
+T105 : --
+T105 : <b>Inputs:</b> backend implementations
+T105 : <b>Outputs:</b> test_grid_ops.c
+T105 : --
+T105 : ✓ Unicode/emoji correct
+T105 : ✓ Wide chars handled
+T105 : ✓ 95% code coverage
+
+Task(T106, "Week 1 integration test", "QA-001", "Test Lead", "Todo", "1")
+T106 : <b>Owner:</b> QA-001 (Test Lead)
+T106 : <b>Est:</b> 1 day
+T106 : <b>Skills:</b> Integration testing
+T106 : --
+T106 : <b>Inputs:</b> Week 1 deliverables
+T106 : <b>Outputs:</b> integration_report.md
+T106 : --
+T106 : ✓ All components integrate
+T106 : ✓ No memory leaks
+T106 : ✓ Sign-off for week 2
+
+' Dependencies with labels
+T101 --> T103 : provides interface
+T102 --> T103 : defines contracts
+T102 --> T104 : backend spec
+T103 --> T105 : test target
+T104 --> T105 : test target
+T103 --> T106 : integration
+T104 --> T106 : integration
+T105 --> T106 : test results
+
+' Critical path highlighting
+T101 -[#FF6B6B,bold]-> T103
+T103 -[#FF6B6B,bold]-> T106
+
+note right of T101
+  <b>Critical Path Task</b>
+  Blocks all downstream work
+  Daily status required
+end note
+
+note bottom of T106
+  <b>Week 1 Gate</b>
+  Must pass before Week 2 starts
+  Requires ARCH-001 approval
+end note
+
+@enduml

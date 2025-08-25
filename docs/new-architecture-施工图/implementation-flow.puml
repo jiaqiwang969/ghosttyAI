@@ -1,0 +1,89 @@
+@startuml implementation-flow
+!theme plain
+title Implementation Flow with Task Ownership
+skinparam backgroundColor #FEFEFE
+
+participant "ARCH-001\nLead Architect" as ARCH #E5B4FF
+participant "CORE-001\nSr. C Developer" as CORE1 #FFE5B4
+participant "CORE-002\nC Developer" as CORE2 #FFE5B4
+participant "INTG-001\nSr. Zig Developer" as INTG1 #B4E5FF
+participant "INTG-002\nZig Developer" as INTG2 #B4E5FF
+participant "QA-001\nTest Lead" as QA1 #B4FFB4
+
+== Week 1: Foundation ==
+
+ARCH -> ARCH: T-102: Design UI Backend\n(1 day)
+note right: Define interfaces,\nABI stability,\nframe batching
+
+CORE1 -> CORE1: T-101: Extract tty_write hooks\n(2 days)
+note left: Analyze 22 tty_cmd_*\nCreate ui_backend.h
+
+ARCH --> CORE1: Approve design
+ARCH --> CORE2: Approve design
+
+CORE2 -> CORE2: T-103: Implement Backend Router\n(3 days)
+note right: Route commands\nto UI or TTY
+
+INTG1 -> INTG1: T-104: Create Ghostty Stub\n(2 days)
+note left: Convert to spans\nFrame aggregation
+
+QA1 -> QA1: T-106: Week 1 Integration\n(1 day)
+note right: Validate routing\nMemory checks
+
+== Week 2: Event System ==
+
+CORE1 -> CORE1: T-201: Event Loop vtable\n(3 days)
+note left: Abstract libevent\nThread safety
+
+CORE1 -> CORE2: Hand off event system
+
+CORE2 -> CORE2: T-202: Grid Callbacks\n(2 days)
+note right: Frame batching\n16.67ms window
+
+CORE1 -> CORE1: T-203: Layout Callbacks\n(2 days)
+note left: Pane structure\nResize handling
+
+INTG2 -> INTG2: T-204: Copy Mode\n(2 days)
+note right: Selection tracking\nClipboard integration
+
+== Week 3: Integration ==
+
+INTG1 -> INTG1: T-301: FFI Bindings\n(3 days)
+note left: C to Zig bridge\nType conversion
+
+INTG1 -> INTG2: FFI interface ready
+
+INTG2 -> INTG2: T-302: Ghostty Integration\n(3 days)
+note right: Connect to terminal\nGrid synchronization
+
+INTG1 -> INTG1: T-303: Memory Safety\n(2 days)
+note left: Boundary checks\nLifecycle management
+
+INTG2 -> INTG2: T-304: Error Handling\n(1 day)
+note right: Error propagation\nRecovery logic
+
+== Week 4: Validation ==
+
+QA1 -> QA1: T-401: Integration Tests\n(3 days)
+note left: vim, htop, git\nStress testing
+
+QA1 -> CORE2: Report bugs
+
+CORE2 -> CORE2: T-404: Bug Fixes\n(2 days)
+note right: Fix critical issues\nPatch integration
+
+QA1 -> QA1: T-504: Final Validation\n(2 days)
+note left: Release criteria\nSign-off
+
+ARCH -> ARCH: Final Approval
+note right: Architecture review\nRelease decision
+
+== Continuous Activities ==
+
+loop Every Day
+    CORE1 --> QA1: Code Review
+    INTG1 --> QA1: Integration Support
+    QA1 --> ARCH: Status Report
+end
+
+@enduml

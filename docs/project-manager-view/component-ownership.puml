@@ -1,0 +1,217 @@
+@startuml component-ownership
+!define PLANTUML_LIMIT_SIZE 32768
+skinparam dpi 300
+skinparam componentStyle uml2
+skinparam linetype ortho
+
+title Component Ownership Map - Ghostty × tmux Integration\n<size:12>Each component has a clear owner and maintainer</size>
+
+package "tmux Core (CORE-001 & CORE-002)" #E8F5E9 {
+  component "server.c/proc.c" as server #FFF8E1
+  note right of server
+    <b>Server & Process</b>
+    Owner: CORE-001
+    Maintains process management
+  end note
+  
+  component "grid.c/screen.c" as grid #FFF8E1
+  note right of grid
+    <b>Grid & Screen</b>
+    Owner: CORE-002
+    Grid operations & updates
+  end note
+  
+  component "tty.c → ui_backend.h" as tty #FFE0B2
+  note right of tty
+    <b>TTY Replacement</b>
+    Owner: CORE-001
+    Critical refactoring point
+  end note
+  
+  component "layout-*.c" as layout #FFF8E1
+  note right of layout
+    <b>Layout Engine</b>
+    Owner: CORE-001
+    Window/pane management
+  end note
+}
+
+package "libtmuxcore Library (ARCH-001 Design, CORE-002 Impl)" #E3F2FD {
+  component "libtmuxcore.h" as lib_h #BBDEFB
+  note right of lib_h
+    <b>Public C API</b>
+    Owner: ARCH-001
+    Stable ABI v1.0
+  end note
+  
+  component "backend_router.c" as router #BBDEFB
+  note right of router
+    <b>Backend Router</b>
+    Owner: CORE-002
+    Routes to TTY or Ghostty
+  end note
+  
+  component "backend_ghostty.c" as backend_g #BBDEFB
+  note right of backend_g
+    <b>Ghostty Backend</b>
+    Owner: INTG-001
+    Structured callbacks
+  end note
+  
+  component "loop_vtable.c" as loop #BBDEFB
+  note right of loop
+    <b>Event Loop VTable</b>
+    Owner: CORE-001
+    Host event integration
+  end note
+}
+
+package "Zig FFI Bridge (INTG-001 & INTG-002)" #FFF8E1 {
+  component "libtmuxcore.zig" as ffi #FFE0B2
+  note right of ffi
+    <b>FFI Bindings</b>
+    Owner: INTG-001
+    C-to-Zig bridge
+  end note
+  
+  component "tmux_bridge.zig" as bridge #FFE0B2
+  note right of bridge
+    <b>Integration Bridge</b>
+    Owner: INTG-002
+    Ghostty connection
+  end note
+  
+  component "memory_safety.zig" as memory #FFE0B2
+  note right of memory
+    <b>Memory Safety</b>
+    Owner: INTG-001
+    Boundary protection
+  end note
+  
+  component "error_handling.zig" as error #FFE0B2
+  note right of error
+    <b>Error Handling</b>
+    Owner: INTG-002
+    Cross-language errors
+  end note
+}
+
+package "Ghostty Integration (INTG-002 & INTG-003)" #FFE0B2 {
+  component "Terminal.Buffer" as terminal #FFCCBC
+  note right of terminal
+    <b>Terminal Buffer</b>
+    Owner: INTG-002
+    Grid integration
+  end note
+  
+  component "GPU Renderer" as gpu #FFCCBC
+  note right of gpu
+    <b>GPU Rendering</b>
+    Owner: INTG-003
+    Performance critical
+  end note
+  
+  component "Event Handler" as events #FFCCBC
+  note right of events
+    <b>Event System</b>
+    Owner: INTG-002
+    Input/output routing
+  end note
+}
+
+package "Testing Infrastructure (QA Team)" #F3E5F5 {
+  component "Unit Tests" as unit #E1BEE7
+  note right of unit
+    <b>Unit Test Suite</b>
+    Owner: QA-002
+    Component testing
+  end note
+  
+  component "Integration Tests" as integ #E1BEE7
+  note right of integ
+    <b>Integration Suite</b>
+    Owner: QA-001
+    End-to-end testing
+  end note
+  
+  component "Performance Tests" as perf #E1BEE7
+  note right of perf
+    <b>Perf Benchmarks</b>
+    Owner: QA-003
+    Speed & memory tests
+  end note
+}
+
+package "DevOps & Release (OPS Team)" #E1F5FE {
+  component "CI/CD Pipeline" as cicd #B3E5FC
+  note right of cicd
+    <b>Build & Test</b>
+    Owner: OPS-001
+    Automated pipeline
+  end note
+  
+  component "Release Package" as release #B3E5FC
+  note right of release
+    <b>Distribution</b>
+    Owner: OPS-002
+    Package & deploy
+  end note
+}
+
+' Critical integration points with ownership labels
+tty -[#FF6B6B,bold]-> lib_h : "ARCH-001 designs"
+lib_h -[#FF6B6B,bold]-> router : "CORE-002 implements"
+router --> backend_g : "INTG-001"
+backend_g -[#FF6B6B,bold]-> ffi : "INTG-001 bridges"
+ffi -[#FF6B6B,bold]-> bridge : "INTG-002"
+bridge -[#FF6B6B,bold]-> terminal : "INTG-002"
+terminal --> gpu : "INTG-003 optimizes"
+loop --> events : "Event flow"
+grid --> backend_g : "Grid updates"
+layout --> backend_g : "Layout changes"
+
+' Test coverage arrows
+unit ..> router : tests
+unit ..> backend_g : tests
+integ ..> bridge : validates
+perf ..> gpu : benchmarks
+
+' CI/CD flow
+cicd ..> unit : runs
+cicd ..> integ : runs
+cicd ..> perf : runs
+cicd --> release : produces
+
+note right of lib_h
+  <b>Critical Design Point</b>
+  ARCH-001 must approve
+  all API changes
+end note
+
+note bottom of backend_g
+  <b>Integration Point</b>
+  INTG-001 coordinates with
+  CORE-001 for C side
+end note
+
+note left of gpu
+  <b>Performance Critical</b>
+  INTG-003 must achieve
+  ≤1 callback per vsync
+end note
+
+legend right
+  |= Color |= Team |
+  | <#E8F5E9> | Core Team |
+  | <#E3F2FD> | Architecture |
+  | <#FFF8E1> | Integration |
+  | <#F3E5F5> | QA Team |
+  | <#E1F5FE> | DevOps |
+  
+  |= Line Style |= Meaning |
+  | Bold Red | Critical Path |
+  | Solid | Data Flow |
+  | Dotted | Test Coverage |
+endlegend
+
+@enduml

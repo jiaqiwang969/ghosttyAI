@@ -1,0 +1,91 @@
+@startuml component-ownership-matrix
+!theme plain
+title Component Ownership and Responsibility Matrix
+skinparam backgroundColor #FEFEFE
+
+package "tmux Core Components" {
+    component "**tty.c modifications**\nOwner: CORE-001\n----\n- tty_write() hooks\n- Backend routing\n- Compatibility layer" as TTY_C #FFE5B4
+    
+    component "**ui_backend.h**\nOwner: ARCH-001\n----\n- Interface design\n- ABI contracts\n- Version management" as UI_H #E5B4FF
+    
+    component "**backend_router.c**\nOwner: CORE-002\n----\n- Command routing\n- Backend selection\n- Performance optimization" as ROUTER #FFCB9A
+    
+    component "**backend_ghostty.c**\nOwner: INTG-001\n----\n- Span conversion\n- Frame aggregation\n- Dirty tracking" as GHOSTTY_C #B4E5FF
+    
+    component "**loop_vtable.c**\nOwner: CORE-001\n----\n- Event abstraction\n- Timer management\n- Thread safety" as LOOP #FFE5B4
+    
+    component "**grid_callbacks.c**\nOwner: CORE-002\n----\n- Frame batching\n- Span merging\n- Callback dispatch" as GRID_CB #FFCB9A
+}
+
+package "FFI Bridge Components" {
+    component "**libtmuxcore.h**\nOwner: ARCH-001\n----\n- Public API\n- ABI stability\n- Documentation" as LIB_H #E5B4FF
+    
+    component "**libtmuxcore.zig**\nOwner: INTG-001\n----\n- FFI bindings\n- Type conversion\n- Memory safety" as LIB_Z #B4E5FF
+    
+    component "**memory_safety.zig**\nOwner: INTG-001\n----\n- Boundary checks\n- Lifecycle management\n- Buffer protection" as MEM_Z #B4E5FF
+}
+
+package "Ghostty Integration Components" {
+    component "**tmux_bridge.zig**\nOwner: INTG-002\n----\n- Terminal connection\n- Event handling\n- Grid synchronization" as BRIDGE #9AD5FF
+    
+    component "**error_handling.zig**\nOwner: INTG-002\n----\n- Error propagation\n- Recovery logic\n- Logging" as ERROR #9AD5FF
+    
+    component "**performance.zig**\nOwner: INTG-003\n----\n- Profiling\n- Optimization\n- Benchmarking" as PERF #7AC5FF
+}
+
+package "Testing Components" {
+    component "**test_grid_ops.c**\nOwner: QA-002\n----\n- Grid operations\n- Unicode handling\n- Attribute testing" as TEST_GRID #9AFF9A
+    
+    component "**integration_tests.zig**\nOwner: QA-001\n----\n- End-to-end tests\n- Application testing\n- Regression suite" as TEST_INT #B4FFB4
+    
+    component "**benchmark_suite.zig**\nOwner: QA-003\n----\n- Performance metrics\n- Latency testing\n- Memory profiling" as BENCH #7AFF7A
+}
+
+package "Documentation" {
+    component "**Architecture Docs**\nOwner: ARCH-001\n----\n- Design decisions\n- Integration guide\n- API reference" as DOCS #E5B4FF
+}
+
+' Relationships and dependencies
+TTY_C --> UI_H : implements
+ROUTER --> UI_H : uses
+GHOSTTY_C --> ROUTER : registers with
+LOOP --> TTY_C : integrates
+GRID_CB --> ROUTER : connects
+
+LIB_H --> UI_H : wraps
+LIB_Z --> LIB_H : implements
+MEM_Z --> LIB_Z : protects
+
+BRIDGE --> LIB_Z : uses
+ERROR --> BRIDGE : supports
+PERF --> BRIDGE : optimizes
+
+TEST_GRID --> GRID_CB : tests
+TEST_INT --> BRIDGE : validates
+BENCH --> PERF : measures
+
+DOCS --> LIB_H : documents
+
+' Legend
+legend right
+    |= Color |= Owner |= Role |
+    | #E5B4FF | ARCH-001 | Lead Architect |
+    | #FFE5B4 | CORE-001 | Sr. C Developer |
+    | #FFCB9A | CORE-002 | C Developer |
+    | #B4E5FF | INTG-001 | Sr. Zig Developer |
+    | #9AD5FF | INTG-002 | Zig Developer |
+    | #7AC5FF | INTG-003 | Performance Engineer |
+    | #B4FFB4 | QA-001 | Test Lead |
+    | #9AFF9A | QA-002 | Test Engineer |
+    | #7AFF7A | QA-003 | Perf Test Engineer |
+endlegend
+
+note bottom
+    **Ownership Rules:**
+    1. Each component has ONE primary owner
+    2. Owner is responsible for implementation and maintenance
+    3. Changes require owner approval or escalation to ARCH-001
+    4. Cross-component changes need coordination meeting
+end note
+
+@enduml

@@ -1,0 +1,138 @@
+@startuml task-driven-architecture
+!theme plain
+title Ghostty × tmux Task-Driven Architecture Flow
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+
+' Define colors for different teams
+!define CORE_COLOR #FFE5B4
+!define INTG_COLOR #B4E5FF
+!define QA_COLOR #B4FFB4
+!define OPS_COLOR #FFB4B4
+!define ARCH_COLOR #E5B4FF
+
+package "Week 1: Foundation Layer" <<Folder>> {
+    
+    component "T-101: tty_write Hooks\n[CORE-001]" as T101 <<CORE_COLOR>>
+    component "T-102: UI Backend Design\n[ARCH-001]" as T102 <<ARCH_COLOR>>
+    component "T-103: Backend Router\n[CORE-002]" as T103 <<CORE_COLOR>>
+    component "T-104: Ghostty Stub\n[INTG-001]" as T104 <<INTG_COLOR>>
+    component "T-105: Grid Tests\n[QA-002]" as T105 <<QA_COLOR>>
+    component "T-106: Integration\n[QA-001]" as T106 <<QA_COLOR>>
+    
+    database "ui_backend.h" as UI_H
+    database "backend_router.c" as ROUTER_C
+    
+    T101 --> UI_H : produces
+    T102 --> UI_H : defines
+    T103 --> ROUTER_C : implements
+    T104 --> ROUTER_C : uses
+    
+    T101 --> T103 : enables
+    T102 --> T103 : guides
+    T102 --> T104 : guides
+    T103 --> T105 : tested by
+    T103 --> T106 : validated
+}
+
+package "Week 2: Event & Callback System" <<Folder>> {
+    
+    component "T-201: Event Loop\n[CORE-001]" as T201 <<CORE_COLOR>>
+    component "T-202: Grid Callbacks\n[CORE-002]" as T202 <<CORE_COLOR>>
+    component "T-203: Layout Callbacks\n[CORE-001]" as T203 <<CORE_COLOR>>
+    component "T-204: Copy Mode\n[INTG-002]" as T204 <<INTG_COLOR>>
+    
+    database "loop_vtable.c" as LOOP_C
+    database "callbacks.c" as CB_C
+    
+    component "Frame Aggregator" as FRAME <<Technology>> {
+        component "16.67ms Window" as WINDOW
+        component "Span Merger" as MERGER
+        component "Dirty Tracker" as DIRTY
+    }
+    
+    T201 --> LOOP_C : produces
+    T202 --> CB_C : implements
+    T202 --> FRAME : uses
+    T203 --> CB_C : extends
+    T204 --> CB_C : extends
+    
+    ROUTER_C --> T201 : requires
+}
+
+package "Week 3: FFI Bridge & Integration" <<Folder>> {
+    
+    component "T-301: FFI Bindings\n[INTG-001]" as T301 <<INTG_COLOR>>
+    component "T-302: Ghostty Integration\n[INTG-002]" as T302 <<INTG_COLOR>>
+    component "T-303: Memory Safety\n[INTG-001]" as T303 <<INTG_COLOR>>
+    component "T-304: Error Handling\n[INTG-002]" as T304 <<INTG_COLOR>>
+    
+    database "libtmuxcore.zig" as ZIG_LIB
+    database "tmux_bridge.zig" as BRIDGE
+    
+    component "Ghostty Terminal" as GHOSTTY <<Technology>> {
+        component "Grid Buffer" as GRID
+        component "GPU Renderer" as GPU
+        component "Event Loop" as GLOOP
+    }
+    
+    T301 --> ZIG_LIB : creates
+    T302 --> BRIDGE : implements
+    T303 --> ZIG_LIB : hardens
+    T304 --> BRIDGE : enhances
+    
+    LOOP_C --> T301 : wrapped by
+    CB_C --> T301 : exposed via
+    
+    BRIDGE --> GHOSTTY : connects to
+    ZIG_LIB --> GRID : updates
+    ZIG_LIB --> GLOOP : integrates
+}
+
+package "Week 4: Testing & Optimization" <<Folder>> {
+    
+    component "T-401: Integration Tests\n[QA-001]" as T401 <<QA_COLOR>>
+    component "T-402: Benchmarks\n[QA-003]" as T402 <<QA_COLOR>>
+    component "T-403: Optimization\n[INTG-003]" as T403 <<INTG_COLOR>>
+    component "T-404: Bug Fixes\n[CORE-002]" as T404 <<CORE_COLOR>>
+    
+    component "Test Suite" as TESTS <<Technology>> {
+        component "vim/neovim" as VIM
+        component "htop" as HTOP
+        component "git log" as GIT
+        component "1000 panes" as STRESS
+    }
+    
+    component "Metrics" as METRICS <<Technology>> {
+        component "60 FPS" as FPS
+        component "< 1ms latency" as LATENCY
+        component "< 10MB/pane" as MEMORY
+    }
+    
+    T401 --> TESTS : executes
+    T402 --> METRICS : measures
+    T403 --> METRICS : improves
+    T404 --> TESTS : fixes failures
+    
+    BRIDGE --> T401 : tested
+    T402 --> T403 : informs
+}
+
+' Critical path highlighting
+T101 -[#red,bold]-> T103 : CRITICAL
+T103 -[#red,bold]-> T201 : CRITICAL
+T201 -[#red,bold]-> T301 : CRITICAL
+T301 -[#red,bold]-> T401 : CRITICAL
+
+' Legend
+legend right
+    |= Color |= Team |
+    |<CORE_COLOR> | Core Team |
+    |<INTG_COLOR> | Integration Team |
+    |<QA_COLOR> | Quality Team |
+    |<OPS_COLOR> | Operations Team |
+    |<ARCH_COLOR> | Architecture |
+    |<#red> | Critical Path |
+endlegend
+
+@enduml

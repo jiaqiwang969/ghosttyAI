@@ -1,0 +1,141 @@
+@startuml data-flow-with-tasks
+!theme plain
+title Data Flow Architecture with Task Ownership
+skinparam backgroundColor #FEFEFE
+
+' Define components with task ownership
+package "tmux Core [CORE-001/002]" {
+    component "Session Manager" as SM
+    component "Window Manager" as WM
+    component "Pane Grid" as PG
+    component "tty_write()" as TTY #FFE5B4
+    
+    note right of TTY
+        T-101: Extract hooks (CORE-001)
+        T-103: Router impl (CORE-002)
+    end note
+}
+
+package "UI Backend Layer [CORE-002]" {
+    component "Backend Router" as BR #FFE5B4
+    component "UI Backend" as UIB #FFE5B4
+    component "TTY Backend" as TTYB
+    
+    note bottom of BR
+        T-103: Implementation
+        Owner: CORE-002
+        Duration: 3 days
+    end note
+}
+
+package "Frame Aggregation [CORE-002]" {
+    component "Span Merger" as SPAN #FFE5B4
+    component "Dirty Tracker" as DIRTY #FFE5B4
+    component "Frame Buffer" as FB #FFE5B4
+    
+    note right of FB
+        T-202: Grid callbacks
+        16.67ms batching
+        Owner: CORE-002
+    end note
+}
+
+package "Event Loop Bridge [CORE-001]" {
+    component "libevent" as LE
+    component "loop_vtable" as LV #FFE5B4
+    component "Host Event Loop" as HEL
+    
+    note left of LV
+        T-201: Event abstraction
+        Owner: CORE-001
+        Duration: 3 days
+    end note
+}
+
+package "FFI Bridge [INTG-001]" {
+    component "libtmuxcore.h" as LIBH
+    component "libtmuxcore.zig" as LIBZ #B4E5FF
+    component "Type Converter" as TC #B4E5FF
+    
+    note bottom of LIBZ
+        T-301: FFI Bindings
+        Owner: INTG-001
+        Duration: 3 days
+    end note
+}
+
+package "Ghostty Integration [INTG-002]" {
+    component "tmux_bridge.zig" as TB #B4E5FF
+    component "Terminal Buffer" as TERM #B4E5FF
+    component "GPU Renderer" as GPU
+    
+    note right of TB
+        T-302: Integration
+        Owner: INTG-002
+        Duration: 3 days
+    end note
+}
+
+package "Testing Infrastructure [QA-001/002/003]" {
+    component "Unit Tests" as UT #B4FFB4
+    component "Integration Tests" as IT #B4FFB4
+    component "Performance Tests" as PT #B4FFB4
+    
+    note bottom
+        T-105: Grid tests (QA-002)
+        T-401: Integration (QA-001)
+        T-402: Benchmarks (QA-003)
+    end note
+}
+
+' Data flow connections
+PG --> TTY : "Cell updates"
+TTY --> BR : "tty_cmd_*"
+BR --> UIB : "UI mode"
+BR --> TTYB : "TTY mode"
+
+UIB --> SPAN : "Raw spans"
+SPAN --> DIRTY : "Merged spans"
+DIRTY --> FB : "Dirty regions"
+FB --> LIBH : "Frame callback"
+
+LIBH --> TC : "C structures"
+TC --> LIBZ : "Zig types"
+LIBZ --> TB : "Type-safe calls"
+TB --> TERM : "Grid updates"
+TERM --> GPU : "Render commands"
+
+LE --> LV : "Events"
+LV --> HEL : "Delegated"
+HEL --> TB : "Callbacks"
+
+' Test connections
+BR -.-> UT : "Unit test"
+TB -.-> IT : "Integration test"
+GPU -.-> PT : "Performance test"
+
+' Critical path highlighting
+TTY -[#red,bold]-> BR
+BR -[#red,bold]-> UIB
+UIB -[#red,bold]-> FB
+FB -[#red,bold]-> LIBH
+LIBH -[#red,bold]-> LIBZ
+LIBZ -[#red,bold]-> TB
+
+' Input flow
+component "User Input" as INPUT #LightGray
+component "Ghostty Input Handler" as GIH #B4E5FF
+component "tmux Input Router" as TIR #FFE5B4
+
+INPUT --> GIH : "Key/Mouse"
+GIH --> TB : "Events"
+TB --> LIBZ : "tmc_send_*"
+LIBZ --> TIR : "Commands"
+TIR --> SM : "Process"
+
+note left of GIH
+    T-304: Error handling
+    Owner: INTG-002
+end note
+
+@enduml
