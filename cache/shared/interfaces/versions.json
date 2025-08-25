@@ -1,0 +1,42 @@
+{
+  "interfaces": {
+    "ui_backend.h": {
+      "current": "0.0.0",
+      "history": [
+        {
+          "version": "0.0.0",
+          "date": "2025-01-06",
+          "status": "pending",
+          "author": "ARCH-001",
+          "notes": "Initial design pending"
+        }
+      ]
+    },
+    "backend_router.h": {
+      "current": "0.0.0",
+      "history": [
+        {
+          "version": "0.0.0",
+          "date": "2025-01-06",
+          "status": "pending",
+          "author": "CORE-002",
+          "notes": "Awaiting ui_backend.h"
+        }
+      ]
+    },
+    "ghostty_backend.h": {
+      "current": "0.0.0",
+      "history": [
+        {
+          "version": "0.0.0",
+          "date": "2025-01-06",
+          "status": "pending",
+          "author": "INTG-001",
+          "notes": "Awaiting ui_backend.h"
+        }
+      ]
+    }
+  },
+  "last_updated": "2025-01-06T09:00:00Z",
+  "pm_approval": null
+}
