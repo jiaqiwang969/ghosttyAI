@@ -29,6 +29,33 @@ START HERE
 ## 🎯 Project Overview
 The Ghostty × tmux Integration project aims to compile tmux as a library (libtmuxcore) and embed it directly into Ghostty, replacing VT/TTY output with structured callbacks and event-driven rendering.
 
+## 📁 Source Code Locations
+
+### Critical Source Directories
+```
+/Users/jqwang/98-ghosttyAI/
+├── tmux/                    # tmux source code (C)
+│   ├── tty.c               # Terminal output functions to intercept
+│   ├── screen-write.c      # Screen writing operations
+│   ├── grid.c              # Grid data structures
+│   ├── window.c            # Window management
+│   ├── session.c           # Session handling
+│   └── cmd-*.c             # Command implementations
+├── ghostty/                 # Ghostty source code (Zig)
+│   ├── src/                # Main source directory
+│   ├── build.zig           # Build configuration
+│   └── macos/              # macOS specific code
+└── cache/                   # EXPERIMENTAL WORKSPACE ONLY
+    └── week1/              # TDD development & testing
+        └── [ROLE]/         # Your experiments, NOT production code
+```
+
+### ⚠️ IMPORTANT: Cache vs Source
+- **cache/**: Your TDD experimental workspace - write tests, try implementations
+- **tmux/**: READ-ONLY production tmux source - analyze but don't modify directly
+- **ghostty/**: READ-ONLY production Ghostty source - analyze but don't modify directly
+- **Final code**: After PM validation, moves from cache → proper source location
+
 ## 🏗️ Agent System Architecture
 
 ### Corrected Agent Hierarchy
@@ -112,14 +139,14 @@ The Ghostty × tmux Integration project aims to compile tmux as a library (libtm
 
 ### Essential Documents for Each Agent
 
-| Agent Type | Primary Task Doc | Architecture Ref | Implementation Guide |
-|------------|-----------------|------------------|---------------------|
-| **c-tmux-specialist** | `/docs/任务清单/第一周/CORE-001.md` | `/docs/architecture-view/tty-write-interception.md` | `/docs/new-architecture-施工图/technical-implementation-guide.md` |
-| **libtmux-core-developer** | `/docs/任务清单/第一周/CORE-002.md` | `/docs/architecture-view/integration-architecture.md` | `/docs/new-architecture-施工图/implementation-flow.puml` |
-| **zig-ghostty-integration** | `/docs/任务清单/第一周/INTG-001.md` | `/docs/architecture-view/callback-sequences.puml` | `/docs/new-architecture-施工图/data-flow-with-tasks.puml` |
-| **qa-test-engineer** | `/docs/任务清单/第一周/QA-002.md` | `/docs/architecture-view/frame-batching.md` | Cache validation checklist |
-| **system-architect** | `/docs/任务清单/第一周/ARCH-001.md` | All `/docs/architecture-view/` | Design review criteria |
-| **devops-engineer-ops001** | `/docs/任务清单/第一周/OPS-001.md` | `/docs/architecture-view/deployment-diagram.puml` | Makefile targets |
+| Agent Type | Primary Task Doc | Source Code to Analyze | Work Directory |
+|------------|-----------------|------------------------|----------------|
+| **c-tmux-specialist** | `/docs/任务清单/第一周/CORE-001.md` | `tmux/tty.c`, `tmux/screen-write.c` | `cache/week1/CORE-001/` |
+| **libtmux-core-developer** | `/docs/任务清单/第一周/CORE-002.md` | `tmux/grid.c`, `tmux/window.c`, `tmux/session.c` | `cache/week1/CORE-002/` |
+| **zig-ghostty-integration** | `/docs/任务清单/第一周/INTG-001.md` | `ghostty/src/`, `ghostty/build.zig` | `cache/week1/INTG-001/` |
+| **qa-test-engineer** | `/docs/任务清单/第一周/QA-002.md` | Both `tmux/` and `ghostty/` for testing | `cache/week1/QA-002/` |
+| **system-architect** | `/docs/任务清单/第一周/ARCH-001.md` | All source for architecture review | Design docs only |
+| **devops-engineer-ops001** | `/docs/任务清单/第一周/OPS-001.md` | `Makefile`, build configs | Build scripts |
 
 ### Daily Workflow Documents
 1. **Morning**: Check `/docs/任务清单/第一周/[YOUR-ROLE].md`
@@ -209,26 +236,43 @@ tmux-orchestrator:
 
 **Step 1: Read Documentation Overview**
 ```bash
-cat /docs/README-目录说明.md  # Understand entire doc structure
+cat /Users/jqwang/98-ghosttyAI/docs/README-目录说明.md  # Understand doc structure
 ```
 
 **Step 2: Find Your Task**
 ```bash
-cat /docs/任务清单/第一周/[YOUR-ROLE].md  # Get your specific tasks
+cat /Users/jqwang/98-ghosttyAI/docs/任务清单/第一周/[YOUR-ROLE].md  # Your tasks
 ```
 
-**Step 3: Set Up Workspace**
+**Step 3: Analyze Source Code (READ-ONLY)**
 ```bash
-cd cache/week1/[YOUR-ROLE]/  # Your working directory
+# For C/tmux specialists - analyze tmux source
+cd /Users/jqwang/98-ghosttyAI/tmux/
+grep -r "tty_cmd_" .  # Find all tty command functions
+cat tty.c | grep "tty_write"  # Understand output mechanism
+
+# For Zig integration - analyze Ghostty source
+cd /Users/jqwang/98-ghosttyAI/ghostty/
+find src -name "*.zig"  # Explore Zig structure
+cat build.zig  # Understand build configuration
+```
+
+**Step 4: Set Up Experimental Workspace**
+```bash
+cd /Users/jqwang/98-ghosttyAI/cache/week1/[YOUR-ROLE]/
 mkdir -p tests wip daily-reports handoffs
+# This is where you EXPERIMENT and write tests
 ```
 
-**Step 4: Begin TDD Cycle**
+**Step 5: Begin TDD Cycle in Cache**
 ```bash
-# Write test first
+# Write test first (in cache, not source!)
 vim cache/week1/[YOUR-ROLE]/tests/test_[feature].c
-# Then implement
+
+# Then experimental implementation
 vim cache/week1/[YOUR-ROLE]/wip/[feature].c
+
+# After PM validation, code moves to proper source location
 ```
 
 ### Starting a Specialized Agent
@@ -319,26 +363,50 @@ git commit -m "[QA-XXX] Tests: Description
 
 ## 📂 Cache-Based Workflow (Agent Specific)
 
+### ⚠️ Cache = Experimental Sandbox, NOT Production
+
+```
+WORKFLOW: Source Analysis → Cache Experiments → PM Validation → Source Integration
+```
+
 ### Agent Working Directories
 
 ```
-cache/week1/
-├── CORE-001/           # c-tmux-specialist workspace
-│   ├── tests/          # C unit tests
-│   ├── wip/            # tty_write extraction
-│   └── handoffs/       # To CORE-002
-├── CORE-002/           # libtmux-core-developer workspace
-│   ├── tests/          # Library tests
-│   ├── wip/            # Router implementation
-│   └── handoffs/       # To INTG-001
-├── INTG-001/           # zig-ghostty-integration workspace
-│   ├── tests/          # FFI tests
-│   ├── wip/            # Bridge code
-│   └── handoffs/       # To QA
-└── QA-001/             # qa-test-engineer workspace
-    ├── tests/          # Integration tests
-    ├── reports/        # Coverage reports
-    └── validation/     # AC verification
+/Users/jqwang/98-ghosttyAI/
+├── tmux/                       # SOURCE (READ-ONLY for analysis)
+│   ├── tty.c                  # Analyze: tty output functions
+│   ├── screen-write.c         # Analyze: screen operations
+│   └── grid.c                 # Analyze: grid structures
+├── ghostty/                    # SOURCE (READ-ONLY for analysis)
+│   ├── src/                   # Analyze: Zig implementation
+│   └── build.zig              # Analyze: build config
+└── cache/week1/                # EXPERIMENTAL WORKSPACE
+    ├── CORE-001/              # c-tmux-specialist experiments
+    │   ├── tests/             # TDD: Write tests FIRST
+    │   ├── wip/               # TDD: Experimental implementations
+    │   └── handoffs/          # Ready for PM validation
+    ├── CORE-002/              # libtmux-core-developer experiments
+    ├── INTG-001/              # zig-ghostty-integration experiments
+    └── QA-001/                # qa-test-engineer test suites
+```
+
+### Source Code Analysis Commands
+
+```bash
+# Analyzing tmux source (CORE teams)
+cd /Users/jqwang/98-ghosttyAI/tmux/
+ctags -R .                      # Generate tags for navigation
+grep -n "tty_cmd_" *.c          # Find tty command functions
+grep -n "grid_" grid.c          # Understand grid operations
+
+# Analyzing Ghostty source (INTG teams)
+cd /Users/jqwang/98-ghosttyAI/ghostty/
+find src -name "*.zig" -exec grep -l "terminal" {} \;
+zig fmt --check src/            # Understand code style
+
+# Your experiments go in cache ONLY
+cd /Users/jqwang/98-ghosttyAI/cache/week1/[YOUR-ROLE]/
+# This is your sandbox for TDD development
 ```
 
 ## 🚀 Daily Agent Coordination
@@ -377,27 +445,52 @@ done
 
 ## 🔧 Agent-Specific Tools and Commands
 
-### For C/tmux Agents
+### For C/tmux Agents (Analyzing tmux source)
 ```bash
-# Analyze tmux source
-grep -r "tty_cmd_" tmux/
-ctags -R tmux/
-gcc -Wall -Wextra -c test.c
-valgrind --leak-check=full ./test
+# Navigate to tmux source
+cd /Users/jqwang/98-ghosttyAI/tmux/
+
+# Analysis commands (READ-ONLY)
+grep -r "tty_cmd_" .           # Find all tty command functions
+grep -r "tty_write" .           # Find output points
+ctags -R .                      # Generate tags for navigation
+cscope -b -R                    # Build cscope database
+
+# Count functions to extract
+grep -c "tty_cmd_" tty.c       # Count hooks needed
+
+# Your experiments in cache
+cd /Users/jqwang/98-ghosttyAI/cache/week1/CORE-001/
+gcc -Wall -Wextra -c tests/test.c  # Compile your tests
+valgrind --leak-check=full ./test  # Check memory leaks
 ```
 
-### For Zig Integration Agents
+### For Zig Integration Agents (Analyzing Ghostty source)
 ```bash
-# Zig FFI development
-zig build-lib -dynamic
-zig test ffi_bridge.zig
-zig fmt --check src/
+# Navigate to Ghostty source
+cd /Users/jqwang/98-ghosttyAI/ghostty/
+
+# Analysis commands (READ-ONLY)
+find src -name "*.zig" | xargs grep "terminal"
+cat build.zig                   # Understand build process
+zig fmt --check src/            # Check code style
+
+# Your experiments in cache
+cd /Users/jqwang/98-ghosttyAI/cache/week1/INTG-001/
+zig build-lib -dynamic wip/ffi_bridge.zig
+zig test tests/test_ffi.zig
 ```
 
-### For QA Agents
+### For QA Agents (Testing both sources)
 ```bash
-# Test execution
-make test
+# Analyze both code bases
+cd /Users/jqwang/98-ghosttyAI/
+find tmux -name "*.c" | wc -l   # Count C files
+find ghostty -name "*.zig" | wc -l  # Count Zig files
+
+# Your test suites in cache
+cd /Users/jqwang/98-ghosttyAI/cache/week1/QA-001/
+make -C tests test
 gcov *.c
 lcov --capture --directory . --output-file coverage.info
 genhtml coverage.info --output-directory coverage_html
