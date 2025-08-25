@@ -26,6 +26,14 @@ START HERE
 [7] Daily: Report to PM via cache/week1/[ROLE]/daily-reports/
 ```
 
+## ⚠️ CRITICAL: Claude Startup in Tmux
+
+**MANDATORY**: Always use `--dangerously-skip-permissions` flag when starting Claude in tmux:
+```bash
+claude --dangerously-skip-permissions
+```
+**Without this flag, Claude will NOT start properly in tmux sessions!**
+
 ## 🎯 Project Overview
 The Ghostty × tmux Integration project aims to compile tmux as a library (libtmuxcore) and embed it directly into Ghostty, replacing VT/TTY output with structured callbacks and event-driven rendering.
 
@@ -281,9 +289,12 @@ vim cache/week1/[YOUR-ROLE]/wip/[feature].c
 # 1. Navigate to correct session/window
 tmux select-window -t ghostty-core:0
 
-# 2. Start Claude with appropriate agent
+# 2. Start Claude with REQUIRED permission flag
 tmux send-keys -t ghostty-core:0 "claude --dangerously-skip-permissions" Enter
-sleep 5
+sleep 5  # Wait for Claude to initialize
+
+# ⚠️ IMPORTANT: --dangerously-skip-permissions is REQUIRED in tmux
+# Without this flag, Claude will not start properly in tmux sessions
 
 # 3. Deploy agent briefing based on role
 tmux send-keys -t ghostty-core:0 "You are the c-tmux-specialist. Your role:
@@ -414,6 +425,12 @@ cd /Users/jqwang/98-ghosttyAI/cache/week1/[YOUR-ROLE]/
 ### Morning Deployment (09:00)
 
 ```bash
+# Start Claude agents with REQUIRED flag
+for window in 0 4; do
+  tmux send-keys -t ghostty-core:$window "claude --dangerously-skip-permissions" Enter
+  sleep 5
+done
+
 # PM deploys daily tasks to agents
 for agent in c-tmux-specialist libtmux-core-developer zig-ghostty-integration; do
   tmux send-keys -t [session:window] "DAILY TASK: Review /docs/任务清单/第一周/
@@ -506,7 +523,13 @@ tmux capture-pane -t [session:window] -p | tail -50
 # Restart agent if needed
 tmux send-keys -t [session:window] C-c  # Interrupt
 tmux send-keys -t [session:window] "clear" Enter
+
+# Restart Claude with REQUIRED flag
+tmux send-keys -t [session:window] "claude --dangerously-skip-permissions" Enter
+sleep 5
+
 # Redeploy agent briefing
+tmux send-keys -t [session:window] "[Agent briefing message]" Enter
 ```
 
 ### Agent Task Switch
