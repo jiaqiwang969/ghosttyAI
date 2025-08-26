@@ -1,15 +1,36 @@
 # 第三周施工方案 - Agent执行手册
 # Week 3 Construction - Agent Execution Manual
 
-**版本**: 1.0  
-**创建时间**: 2025-08-26 22:45  
-**目标**: 为每个Agent提供清晰的执行指导和资源索引
+**版本**: 2.0 (Unified Executor)  
+**创建时间**: 2025-08-26 23:00  
+**目标**: 由单一agent完成所有集成工作，避免协作开销
 
 ---
 
-## 👥 Agent任务分配与资源映射
+## 👤 统一执行者：week3-ghostty-tmux-executor
 
-### CORE-001 (c-tmux-specialist) - T-301-R执行手册
+### 执行优势
+- **无需协调**: 一个agent掌握全局，无沟通成本
+- **快速迭代**: 直接修改，无需等待其他agent
+- **全栈能力**: 从C到Zig，从构建到测试
+- **资源集中**: 所有Week 2成果统一管理
+
+---
+
+## 🎯 week3-ghostty-tmux-executor 完整任务清单
+
+### 你需要完成的所有任务
+1. **T-301-R**: 修改tmux源码集成backend router (Day 1-2)
+2. **T-302-R**: 构建libtmuxcore动态库 (Day 2-3)
+3. **T-303-R**: 创建Ghostty tmux集成模块 (Day 3-4)
+4. **T-304-R**: Terminal模块集成tmux (Day 4)
+5. **T-305-R**: 端到端集成测试 (Day 5)
+6. **T-306-R**: 性能验证与优化 (Day 6)
+7. **T-307-R**: 架构评审 (Day 7)
+
+---
+
+## 📚 统一资源索引
 
 #### 你的任务：修改tmux源码集成backend router
 **工期**: Day 1-2  
