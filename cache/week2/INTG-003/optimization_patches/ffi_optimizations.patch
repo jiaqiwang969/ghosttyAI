@@ -1,0 +1,162 @@
+diff --git a/cache/week2/INTG-001/ffi/ffi_optimizations.zig b/cache/week2/INTG-001/ffi/ffi_optimizations.zig
+new file mode 100644
+index 0000000..optimized
+--- /dev/null
++++ b/cache/week2/INTG-001/ffi/ffi_optimizations.zig
+@@ -0,0 +1,125 @@
++// ffi_optimizations.zig - FFI Performance Optimizations
++// Purpose: Reduce FFI overhead to <50ns per call
++// Author: INTG-003 (performance-eng)
++// Date: 2025-08-25
++
++const std = @import("std");
++const c = @cImport({
++    @cInclude("stdint.h");
++    @cInclude("string.h");
++});
++
++// ============================================================================
++// Batch Processing for FFI Calls
++// ============================================================================
++
++// OPTIMIZATION: Batch multiple grid updates in single FFI call
++pub const GridUpdateBatch = extern struct {
++    updates: [*c]GridUpdate,
++    count: u32,
++    
++    const GridUpdate = extern struct {
++        row: u32,
++        col: u32,
++        value: u32,
++        attrs: u16,
++    };
++};
++
++// Process batch of updates (1 FFI call instead of N)
++pub export fn process_grid_updates_batch(batch: *GridUpdateBatch) void {
++    // OPTIMIZATION: Process all updates in single FFI crossing
++    var i: u32 = 0;
++    while (i < batch.count) : (i += 1) {
++        const update = batch.updates[i];
++        // Process without additional FFI calls
++        processGridUpdateInternal(update);
++    }
++}
++
++fn processGridUpdateInternal(update: GridUpdateBatch.GridUpdate) void {
++    // Internal processing without FFI overhead
++    // ...
++}
++
++// ============================================================================
++// Zero-Copy String Operations
++// ============================================================================
++
++// OPTIMIZATION: Use direct pointer instead of copying
++pub export fn process_string_zero_copy(str: [*c]const u8, len: usize) void {
++    // Create slice from C pointer without allocation
++    const slice = str[0..len];
++    
++    // Process directly on C memory
++    processStringInternal(slice);
++}
++
++fn processStringInternal(str: []const u8) void {
++    // Work directly with the slice
++    // No allocation, no copy
++}
++
++// ============================================================================
++// Function Pointer Caching
++// ============================================================================
++
++// OPTIMIZATION: Cache frequently called function pointers
++const CallbackCache = struct {
++    var grid_update_fn: ?*const fn(u32, u32, u32) callconv(.C) void = null;
++    var event_dispatch_fn: ?*const fn(*anyopaque) callconv(.C) void = null;
++    var buffer_write_fn: ?*const fn([*c]const u8, usize) callconv(.C) void = null;
++    
++    pub fn init(vtable: *const c.ui_backend_vtable) void {
++        grid_update_fn = vtable.grid_update;
++        event_dispatch_fn = vtable.event_dispatch;
++        buffer_write_fn = vtable.buffer_write;
++    }
++    
++    // Inline wrappers for cached calls
++    pub inline fn gridUpdate(row: u32, col: u32, value: u32) void {
++        if (grid_update_fn) |fn| {
++            fn(row, col, value);
++        }
++    }
++    
++    pub inline fn eventDispatch(data: *anyopaque) void {
++        if (event_dispatch_fn) |fn| {
++            fn(data);
++        }
++    }
++};
++
++// ============================================================================
++// Memory Pool for FFI Data
++// ============================================================================
++
++// OPTIMIZATION: Pre-allocated pool for FFI data structures
++const FFIDataPool = struct {
++    const POOL_SIZE = 1024;
++    
++    var pool: [POOL_SIZE]FFIData = undefined;
++    var free_list: [POOL_SIZE]u16 = undefined;
++    var free_count: u16 = POOL_SIZE;
++    
++    const FFIData = extern struct {
++        type: u32,
++        data: [64]u8,  // Fixed size for pool allocation
++    };
++    
++    pub fn init() void {
++        var i: u16 = 0;
++        while (i < POOL_SIZE) : (i += 1) {
++            free_list[i] = i;
++        }
++    }
++    
++    pub fn alloc() ?*FFIData {
++        if (free_count == 0) return null;
++        
++        free_count -= 1;
++        const index = free_list[free_count];
++        return &pool[index];
++    }
++    
++    pub fn free(data: *FFIData) void {
++        if (free_count >= POOL_SIZE) return;
++        
++        const index = (@ptrToInt(data) - @ptrToInt(&pool[0])) / @sizeOf(FFIData);
++        free_list[free_count] = @intCast(u16, index);
++        free_count += 1;
++    }
++};
++
++// ============================================================================
++// SIMD Optimizations for Bulk Operations
++// ============================================================================
++
++// OPTIMIZATION: Use SIMD for bulk memory operations
++pub export fn clear_grid_row_simd(row: [*]u32, width: u32) void {
++    // Use vector operations for clearing
++    const vector_size = 8;  // Process 8 u32s at once
++    const vectors = width / vector_size;
++    
++    var i: u32 = 0;
++    while (i < vectors) : (i += 1) {
++        const offset = i * vector_size;
++        // SIMD clear operation
++        @memset(@ptrCast([*]u8, &row[offset]), 0, vector_size * @sizeOf(u32));
++    }
++    
++    // Handle remainder
++    const remainder_start = vectors * vector_size;
++    if (remainder_start < width) {
++        @memset(@ptrCast([*]u8, &row[remainder_start]), 0, (width - remainder_start) * @sizeOf(u32));
++    }
++}

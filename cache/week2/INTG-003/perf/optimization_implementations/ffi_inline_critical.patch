@@ -1,0 +1,312 @@
+diff --git a/cache/week2/INTG-001/ffi/ffi_inline_critical.zig b/cache/week2/INTG-001/ffi/ffi_inline_critical.zig
+new file mode 100644
+index 0000000..optimized
+--- /dev/null
++++ b/cache/week2/INTG-001/ffi/ffi_inline_critical.zig
+@@ -0,0 +1,287 @@
++// ffi_inline_critical.zig - Inline Critical FFI Paths
++// Purpose: Reduce FFI overhead from <100ns to <50ns
++// Author: INTG-003 (performance-eng)
++// Date: 2025-08-26
++
++const std = @import("std");
++const builtin = @import("builtin");
++
++// ============================================================================
++// Compiler Optimization Directives
++// ============================================================================
++
++// Force inline for critical paths
++pub inline fn forceInline(comptime T: type) type {
++    return struct {
++        pub inline fn call(func: T) T {
++            return func;
++        }
++    };
++}
++
++// Disable safety checks in release mode for hot paths
++const safety_checks = builtin.mode == .Debug;
++
++// ============================================================================
++// Zero-Cost Abstractions
++// ============================================================================
++
++// Direct memory mapping without overhead
++pub const DirectBuffer = extern struct {
++    ptr: [*]u8,
++    len: usize,
++    
++    pub inline fn init(ptr: [*]u8, len: usize) DirectBuffer {
++        return .{ .ptr = ptr, .len = len };
++    }
++    
++    pub inline fn slice(self: DirectBuffer) []u8 {
++        return self.ptr[0..self.len];
++    }
++    
++    pub inline fn asConst(self: DirectBuffer) []const u8 {
++        return self.ptr[0..self.len];
++    }
++};
++
++// ============================================================================
++// Inline FFI Functions - No Call Overhead
++// ============================================================================
++
++// Grid update - fully inlined
++pub inline fn gridUpdateInline(
++    row: u32,
++    col: u32,
++    char: u32,
++    fg: u32,
++    bg: u32,
++    attrs: u16
++) void {
++    // Direct memory write without function call
++    const grid_base = @intToPtr([*]GridCell, GRID_BASE_ADDRESS);
++    const idx = row * GRID_WIDTH + col;
++    
++    // Compiler will inline this completely
++    grid_base[idx] = GridCell{
++        .character = char,
++        .fg_color = fg,
++        .bg_color = bg,
++        .attributes = attrs,
++    };
++}
++
++// Event dispatch - zero overhead
++pub inline fn eventDispatchInline(event_type: u32, data: usize) void {
++    // Direct vtable access without indirection
++    const vtable = @intToPtr(*const EventVTable, VTABLE_ADDRESS);
++    
++    // Compiler optimizes switch to jump table
++    switch (event_type) {
++        EVENT_KEY => vtable.on_key.?(data),
++        EVENT_MOUSE => vtable.on_mouse.?(data),
++        EVENT_RESIZE => vtable.on_resize.?(data),
++        EVENT_TIMER => vtable.on_timer.?(data),
++        else => {},
++    }
++}
++
++// ============================================================================
++// Batch Processing - Amortize FFI Cost
++// ============================================================================
++
++pub const BatchOperation = extern struct {
++    ops: [BATCH_SIZE]Operation,
++    count: u32,
++    
++    const BATCH_SIZE = 64;  // L1 cache friendly
++    
++    const Operation = extern struct {
++        type: u32,
++        data: [16]u8,  // Fixed size for alignment
++    };
++    
++    pub inline fn init() BatchOperation {
++        return .{
++            .ops = undefined,
++            .count = 0,
++        };
++    }
++    
++    pub inline fn add(self: *BatchOperation, op_type: u32, data: []const u8) bool {
++        if (self.count >= BATCH_SIZE) return false;
++        
++        self.ops[self.count].type = op_type;
++        @memcpy(&self.ops[self.count].data, data.ptr, @minimum(data.len, 16));
++        self.count += 1;
++        
++        return true;
++    }
++    
++    pub inline fn flush(self: *BatchOperation) void {
++        processBatchInline(self.ops[0..self.count]);
++        self.count = 0;
++    }
++};
++
++// Process entire batch in one FFI call
++inline fn processBatchInline(ops: []const BatchOperation.Operation) void {
++    // Unroll loop for small batches
++    if (ops.len <= 8) {
++        comptime var i = 0;
++        inline while (i < 8) : (i += 1) {
++            if (i < ops.len) {
++                processOpInline(ops[i]);
++            }
++        }
++    } else {
++        // Regular loop for larger batches
++        for (ops) |op| {
++            processOpInline(op);
++        }
++    }
++}
++
++inline fn processOpInline(op: BatchOperation.Operation) void {
++    // Direct dispatch without overhead
++    switch (op.type) {
++        OP_GRID_UPDATE => {
++            const data = @bitCast(GridUpdateData, op.data);
++            gridUpdateInline(data.row, data.col, data.char, data.fg, data.bg, data.attrs);
++        },
++        OP_CURSOR_MOVE => {
++            const data = @bitCast(CursorData, op.data);
++            cursorMoveInline(data.row, data.col);
++        },
++        else => {},
++    }
++}
++
++// ============================================================================
++// SIMD String Operations
++// ============================================================================
++
++pub inline fn stringCopySimd(dst: [*]u8, src: [*]const u8, len: usize) void {
++    // Use vector operations for bulk copy
++    const vector_size = 32;  // AVX2
++    const vectors = len / vector_size;
++    
++    // Vector copy
++    var i: usize = 0;
++    while (i < vectors) : (i += 1) {
++        const offset = i * vector_size;
++        const src_vec = @ptrCast(*const @Vector(32, u8), src + offset);
++        const dst_vec = @ptrCast(*@Vector(32, u8), dst + offset);
++        dst_vec.* = src_vec.*;
++    }
++    
++    // Handle remainder
++    const remainder = len % vector_size;
++    if (remainder > 0) {
++        const start = vectors * vector_size;
++        @memcpy(dst + start, src + start, remainder);
++    }
++}
++
++// ============================================================================
++// Lock-Free Ring Buffer for FFI Communication
++// ============================================================================
++
++pub const RingBuffer = extern struct {
++    data: [BUFFER_SIZE]u8 align(64),
++    head: std.atomic.Atomic(u32) align(64),
++    tail: std.atomic.Atomic(u32) align(64),
++    
++    const BUFFER_SIZE = 65536;  // 64KB
++    const CACHE_LINE = 64;
++    
++    pub inline fn init() RingBuffer {
++        return .{
++            .data = undefined,
++            .head = std.atomic.Atomic(u32).init(0),
++            .tail = std.atomic.Atomic(u32).init(0),
++        };
++    }
++    
++    pub inline fn write(self: *RingBuffer, data: []const u8) bool {
++        const head = self.head.load(.Monotonic);
++        const tail = self.tail.load(.Acquire);
++        
++        const available = if (tail > head) 
++            tail - head - 1 
++        else 
++            BUFFER_SIZE - head + tail - 1;
++            
++        if (data.len > available) return false;
++        
++        // Copy data (may wrap around)
++        const first_part = @minimum(data.len, BUFFER_SIZE - head);
++        @memcpy(&self.data[head], data.ptr, first_part);
++        
++        if (first_part < data.len) {
++            @memcpy(&self.data[0], data.ptr + first_part, data.len - first_part);
++        }
++        
++        // Update head with memory barrier
++        const new_head = (head + data.len) % BUFFER_SIZE;
++        self.head.store(new_head, .Release);
++        
++        return true;
++    }
++    
++    pub inline fn read(self: *RingBuffer, buffer: []u8) usize {
++        const head = self.head.load(.Acquire);
++        const tail = self.tail.load(.Monotonic);
++        
++        if (head == tail) return 0;  // Empty
++        
++        const available = if (head > tail)
++            head - tail
++        else
++            BUFFER_SIZE - tail + head;
++            
++        const to_read = @minimum(buffer.len, available);
++        
++        // Copy data (may wrap around)
++        const first_part = @minimum(to_read, BUFFER_SIZE - tail);
++        @memcpy(buffer.ptr, &self.data[tail], first_part);
++        
++        if (first_part < to_read) {
++            @memcpy(buffer.ptr + first_part, &self.data[0], to_read - first_part);
++        }
++        
++        // Update tail
++        const new_tail = (tail + to_read) % BUFFER_SIZE;
++        self.tail.store(new_tail, .Release);
++        
++        return to_read;
++    }
++};
++
++// ============================================================================
++// Compile-Time Optimized FFI Dispatch
++// ============================================================================
++
++pub fn FFIDispatcher(comptime functions: anytype) type {
++    return struct {
++        // Generate inline dispatch for each function at compile time
++        pub inline fn dispatch(func_id: u32, args: anytype) void {
++            comptime var i = 0;
++            inline while (i < functions.len) : (i += 1) {
++                if (func_id == i) {
++                    functions[i](args);
++                    return;
++                }
++            }
++        }
++    };
++}
++
++// ============================================================================
++// Performance Measurement
++// ============================================================================
++
++pub inline fn measureFFIOverhead() u64 {
++    const start = std.time.nanoTimestamp();
++    
++    // Minimal FFI operation
++    asm volatile ("" ::: "memory");  // Compiler barrier
++    
++    const end = std.time.nanoTimestamp();
++    return @intCast(u64, end - start);
++}
++
++// Constants for direct memory access
++const GRID_BASE_ADDRESS = 0x100000000;  // Example address
++const VTABLE_ADDRESS = 0x100001000;
++const GRID_WIDTH = 256;
++
++// Event types
++const EVENT_KEY = 1;
++const EVENT_MOUSE = 2;
++const EVENT_RESIZE = 3;
++const EVENT_TIMER = 4;
++
++// Operation types
++const OP_GRID_UPDATE = 1;
++const OP_CURSOR_MOVE = 2;

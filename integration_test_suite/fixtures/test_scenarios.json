@@ -1,0 +1,367 @@
+{
+  "test_scenarios": [
+    {
+      "id": "SCENARIO-001",
+      "name": "Basic Session Creation",
+      "description": "Create a simple tmux session with one window",
+      "steps": [
+        "Initialize event loop router",
+        "Create Ghostty backend",
+        "Create tmux session",
+        "Verify session exists",
+        "Cleanup"
+      ],
+      "expected_result": "Session created successfully",
+      "edge_cases": ["Duplicate session name", "Invalid characters in name"],
+      "performance_target": {
+        "latency_ms": 10,
+        "memory_kb": 1024
+      }
+    },
+    {
+      "id": "SCENARIO-002", 
+      "name": "Multi-Window Management",
+      "description": "Create session with multiple windows and switch between them",
+      "steps": [
+        "Create session",
+        "Create 5 windows",
+        "Switch to each window",
+        "Verify active window",
+        "Close windows in reverse order"
+      ],
+      "expected_result": "All windows managed correctly",
+      "edge_cases": ["Maximum windows limit", "Rapid switching"],
+      "performance_target": {
+        "latency_ms": 5,
+        "memory_kb": 5120
+      }
+    },
+    {
+      "id": "SCENARIO-003",
+      "name": "Pane Splitting",
+      "description": "Split panes in various configurations",
+      "steps": [
+        "Create window",
+        "Split vertically",
+        "Split horizontally",
+        "Create 2x2 grid",
+        "Resize panes",
+        "Navigate between panes"
+      ],
+      "expected_result": "Panes split and navigated correctly",
+      "edge_cases": ["Minimum pane size", "Maximum panes"],
+      "performance_target": {
+        "latency_ms": 3,
+        "memory_kb": 2048
+      }
+    },
+    {
+      "id": "SCENARIO-004",
+      "name": "Heavy Text Output",
+      "description": "Process large amounts of terminal output",
+      "steps": [
+        "Create pane",
+        "Output 10MB of text",
+        "Scroll through buffer",
+        "Search in buffer",
+        "Clear buffer"
+      ],
+      "expected_result": "Text rendered without lag",
+      "edge_cases": ["Unicode characters", "Control sequences"],
+      "performance_target": {
+        "throughput_mbps": 100,
+        "latency_ms": 1
+      }
+    },
+    {
+      "id": "SCENARIO-005",
+      "name": "Event Loop Integration",
+      "description": "Test event loop vtable switching",
+      "steps": [
+        "Start with libevent mode",
+        "Add 100 I/O events",
+        "Switch to Ghostty mode",
+        "Verify events still work",
+        "Switch to hybrid mode",
+        "Process events"
+      ],
+      "expected_result": "Seamless backend switching",
+      "edge_cases": ["Events during switch", "Concurrent switches"],
+      "performance_target": {
+        "switch_time_ms": 10,
+        "overhead_percent": 1
+      }
+    },
+    {
+      "id": "SCENARIO-006",
+      "name": "FFI Callback Chain",
+      "description": "Test complex callback sequences across FFI",
+      "steps": [
+        "Register Zig callback",
+        "Trigger from C code",
+        "Callback calls back to C",
+        "C calls another Zig function",
+        "Verify call stack"
+      ],
+      "expected_result": "Callbacks execute in correct order",
+      "edge_cases": ["Recursive callbacks", "Exception handling"],
+      "performance_target": {
+        "latency_ns": 100,
+        "stack_depth": 10
+      }
+    },
+    {
+      "id": "SCENARIO-007",
+      "name": "Memory Pressure",
+      "description": "Test behavior under memory constraints",
+      "steps": [
+        "Create 100 sessions",
+        "Allocate large buffers",
+        "Trigger memory pressure",
+        "Verify graceful degradation",
+        "Clean up gradually"
+      ],
+      "expected_result": "System remains stable",
+      "edge_cases": ["OOM killer", "Swap usage"],
+      "performance_target": {
+        "max_memory_mb": 500,
+        "recovery_time_s": 5
+      }
+    },
+    {
+      "id": "SCENARIO-008",
+      "name": "Rapid Session Cycling",
+      "description": "Create and destroy sessions rapidly",
+      "steps": [
+        "Loop 1000 times:",
+        "  Create session",
+        "  Create 3 windows",
+        "  Write to each window",
+        "  Destroy session",
+        "Check for leaks"
+      ],
+      "expected_result": "No memory leaks",
+      "edge_cases": ["Concurrent creation/destruction"],
+      "performance_target": {
+        "cycles_per_second": 100,
+        "leak_tolerance_bytes": 0
+      }
+    },
+    {
+      "id": "SCENARIO-009",
+      "name": "Terminal Resize Storm",
+      "description": "Handle rapid terminal resize events",
+      "steps": [
+        "Create full layout",
+        "Resize terminal 100 times",
+        "Random sizes each time",
+        "Verify layout adapts",
+        "Check rendering"
+      ],
+      "expected_result": "Layout remains correct",
+      "edge_cases": ["Minimum terminal size", "Aspect ratios"],
+      "performance_target": {
+        "resize_latency_ms": 10,
+        "fps_during_resize": 30
+      }
+    },
+    {
+      "id": "SCENARIO-010",
+      "name": "Copy/Paste Integration",
+      "description": "Test clipboard operations",
+      "steps": [
+        "Select text in pane",
+        "Copy to clipboard",
+        "Paste in different pane",
+        "Copy across sessions",
+        "Verify content"
+      ],
+      "expected_result": "Clipboard works correctly",
+      "edge_cases": ["Large selections", "Binary data"],
+      "performance_target": {
+        "copy_latency_ms": 1,
+        "max_clipboard_mb": 10
+      }
+    },
+    {
+      "id": "SCENARIO-011",
+      "name": "Command History",
+      "description": "Test command history functionality",
+      "steps": [
+        "Execute 100 commands",
+        "Navigate history",
+        "Search in history",
+        "Persist across sessions",
+        "Load on restart"
+      ],
+      "expected_result": "History fully functional",
+      "edge_cases": ["Duplicate commands", "Special characters"],
+      "performance_target": {
+        "search_time_ms": 1,
+        "max_history_items": 10000
+      }
+    },
+    {
+      "id": "SCENARIO-012",
+      "name": "Color and Styling",
+      "description": "Test terminal colors and text styling",
+      "steps": [
+        "Output 256 colors",
+        "Test true color",
+        "Bold, italic, underline",
+        "Background colors",
+        "Color gradients"
+      ],
+      "expected_result": "All colors render correctly",
+      "edge_cases": ["Color space conversion", "Transparency"],
+      "performance_target": {
+        "render_time_ms": 1,
+        "color_accuracy": 99
+      }
+    },
+    {
+      "id": "SCENARIO-013",
+      "name": "Unicode and Emoji",
+      "description": "Test Unicode character support",
+      "steps": [
+        "Output Unicode ranges",
+        "Display emoji",
+        "CJK characters",
+        "RTL text",
+        "Combining characters"
+      ],
+      "expected_result": "All characters display correctly",
+      "edge_cases": ["Surrogate pairs", "Zero-width joiners"],
+      "performance_target": {
+        "render_time_ms": 5,
+        "glyph_cache_mb": 50
+      }
+    },
+    {
+      "id": "SCENARIO-014",
+      "name": "Network Latency",
+      "description": "Test with simulated network delay",
+      "steps": [
+        "Add 100ms latency",
+        "Type commands",
+        "Verify echo",
+        "Test predictions",
+        "Remove latency"
+      ],
+      "expected_result": "Responsive despite latency",
+      "edge_cases": ["Packet loss", "Jitter"],
+      "performance_target": {
+        "perceived_latency_ms": 50,
+        "prediction_accuracy": 90
+      }
+    },
+    {
+      "id": "SCENARIO-015",
+      "name": "File Transfer",
+      "description": "Transfer files through terminal",
+      "steps": [
+        "Use base64 encoding",
+        "Transfer 10MB file",
+        "Verify integrity",
+        "Test binary files",
+        "Progress indication"
+      ],
+      "expected_result": "Files transfer correctly",
+      "edge_cases": ["Corrupted data", "Interrupted transfer"],
+      "performance_target": {
+        "throughput_mbps": 10,
+        "integrity_check": "sha256"
+      }
+    },
+    {
+      "id": "SCENARIO-016",
+      "name": "Mouse Support",
+      "description": "Test mouse integration",
+      "steps": [
+        "Enable mouse mode",
+        "Click to position cursor",
+        "Select with mouse",
+        "Scroll with wheel",
+        "Right-click menu"
+      ],
+      "expected_result": "Mouse fully functional",
+      "edge_cases": ["Touch events", "Multi-button mice"],
+      "performance_target": {
+        "click_latency_ms": 1,
+        "scroll_fps": 60
+      }
+    },
+    {
+      "id": "SCENARIO-017",
+      "name": "Session Restoration",
+      "description": "Save and restore session state",
+      "steps": [
+        "Create complex layout",
+        "Save session state",
+        "Kill all processes",
+        "Restore from save",
+        "Verify layout matches"
+      ],
+      "expected_result": "Perfect restoration",
+      "edge_cases": ["Partial saves", "Version mismatch"],
+      "performance_target": {
+        "save_time_ms": 100,
+        "restore_time_ms": 200
+      }
+    },
+    {
+      "id": "SCENARIO-018",
+      "name": "Plugin System",
+      "description": "Test Ghostty plugin integration",
+      "steps": [
+        "Load test plugin",
+        "Trigger plugin hooks",
+        "Plugin modifies output",
+        "Unload plugin",
+        "Verify cleanup"
+      ],
+      "expected_result": "Plugins work correctly",
+      "edge_cases": ["Plugin crashes", "API version mismatch"],
+      "performance_target": {
+        "plugin_overhead_percent": 5,
+        "load_time_ms": 50
+      }
+    },
+    {
+      "id": "SCENARIO-019",
+      "name": "Accessibility",
+      "description": "Test screen reader support",
+      "steps": [
+        "Enable accessibility",
+        "Read screen content",
+        "Navigate by word",
+        "Announce changes",
+        "Keyboard shortcuts"
+      ],
+      "expected_result": "Full accessibility support",
+      "edge_cases": ["Rapid updates", "Complex layouts"],
+      "performance_target": {
+        "announcement_delay_ms": 10,
+        "navigation_speed": "instant"
+      }
+    },
+    {
+      "id": "SCENARIO-020",
+      "name": "Performance Profiling",
+      "description": "Profile system performance",
+      "steps": [
+        "Enable profiling",
+        "Run workload",
+        "Collect metrics",
+        "Generate report",
+        "Identify bottlenecks"
+      ],
+      "expected_result": "Accurate performance data",
+      "edge_cases": ["Profiling overhead", "Multi-threaded code"],
+      "performance_target": {
+        "profiling_overhead_percent": 2,
+        "sample_rate_hz": 1000
+      }
+    }
+  ]
+}

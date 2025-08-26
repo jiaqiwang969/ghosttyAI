@@ -1,0 +1,297 @@
+diff --git a/cache/week2/INTG-002/copy_mode_backend.c b/cache/week2/INTG-002/copy_mode_backend.c
+index original..optimized
+--- a/cache/week2/INTG-002/copy_mode_backend.c
++++ b/cache/week2/INTG-002/copy_mode_backend.c
+@@ -8,10 +8,100 @@
+ #include <string.h>
+ #include "copy_mode.h"
+ 
++// ============================================================================
++// Incremental Rendering Optimization
++// ============================================================================
++
++#define DIRTY_LINES_SIZE 4096
++#define CACHE_LINE_SIZE 64
++#define likely(x) __builtin_expect(!!(x), 1)
++#define unlikely(x) __builtin_expect(!!(x), 0)
++
++typedef struct {
++    uint64_t dirty_bits[DIRTY_LINES_SIZE / 64];  // Bit per line
++    int min_dirty;
++    int max_dirty;
++    int visible_start;
++    int visible_end;
++} dirty_tracker_t;
++
++typedef struct __attribute__((aligned(CACHE_LINE_SIZE))) {
++    char* lines[DIRTY_LINES_SIZE];
++    uint32_t line_hashes[DIRTY_LINES_SIZE];  // Quick change detection
++    dirty_tracker_t dirty;
++    
++    // Selection state
++    int selection_start_line;
++    int selection_start_col;
++    int selection_end_line;
++    int selection_end_col;
++    
++    // Rendering cache
++    char* render_buffer;
++    size_t render_buffer_size;
++    uint64_t last_render_time;
++} copy_mode_state_t;
++
++static copy_mode_state_t g_copy_state = {0};
++
++// ============================================================================
++// Fast Hash for Line Change Detection
++// ============================================================================
++
++static inline uint32_t hash_line(const char* line, size_t len) {
++    // FNV-1a hash for speed
++    uint32_t hash = 2166136261u;
++    
++    // Process 8 bytes at a time for speed
++    while (len >= 8) {
++        uint64_t chunk = *(uint64_t*)line;
++        hash ^= chunk & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 8) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 16) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 24) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 32) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 40) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 48) & 0xFF;
++        hash *= 16777619;
++        hash ^= (chunk >> 56) & 0xFF;
++        hash *= 16777619;
++        
++        line += 8;
++        len -= 8;
++    }
++    
++    // Handle remainder
++    while (len--) {
++        hash ^= (unsigned char)*line++;
++        hash *= 16777619;
++    }
++    
++    return hash;
++}
++
++// ============================================================================
++// Dirty Line Tracking with Bit Operations
++// ============================================================================
++
++static inline void mark_dirty(dirty_tracker_t* dirty, int line) {
++    int idx = line / 64;
++    int bit = line % 64;
++    
++    __atomic_or_fetch(&dirty->dirty_bits[idx], 1ULL << bit, __ATOMIC_RELAXED);
++    
++    // Update bounds
++    int current;
++    do {
++        current = __atomic_load_n(&dirty->min_dirty, __ATOMIC_RELAXED);
++    } while (line < current && !__atomic_compare_exchange_n(&dirty->min_dirty, 
++             &current, line, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
++    
++    do {
++        current = __atomic_load_n(&dirty->max_dirty, __ATOMIC_RELAXED);
++    } while (line > current && !__atomic_compare_exchange_n(&dirty->max_dirty,
++             &current, line, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
++}
++
++static inline int is_dirty(const dirty_tracker_t* dirty, int line) {
++    int idx = line / 64;
++    int bit = line % 64;
++    return (dirty->dirty_bits[idx] >> bit) & 1;
++}
++
++static inline void clear_dirty(dirty_tracker_t* dirty) {
++    memset(dirty->dirty_bits, 0, sizeof(dirty->dirty_bits));
++    dirty->min_dirty = INT_MAX;
++    dirty->max_dirty = -1;
++}
++
++// ============================================================================
++// Incremental Selection Rendering
++// ============================================================================
++
++static void render_selection_incremental(copy_mode_state_t* state) {
++    // Only render visible dirty lines
++    int start = state->dirty.visible_start;
++    int end = state->dirty.visible_end;
++    
++    // Optimize: skip if nothing visible is dirty
++    if (state->dirty.min_dirty > end || state->dirty.max_dirty < start) {
++        return;  // Nothing to render
++    }
++    
++    // Render only dirty lines within visible range
++    for (int line = start; line <= end; line++) {
++        if (!is_dirty(&state->dirty, line)) {
++            continue;  // Skip clean lines
++        }
++        
++        // Check if line content actually changed
++        const char* line_content = state->lines[line];
++        size_t line_len = strlen(line_content);
++        uint32_t new_hash = hash_line(line_content, line_len);
++        
++        if (state->line_hashes[line] == new_hash) {
++            continue;  // Content unchanged despite being marked dirty
++        }
++        
++        state->line_hashes[line] = new_hash;
++        
++        // Render this line with selection highlighting if needed
++        if (line >= state->selection_start_line && line <= state->selection_end_line) {
++            render_line_with_selection(state, line);
++        } else {
++            render_line_normal(state, line);
++        }
++    }
++    
++    clear_dirty(&state->dirty);
++}
++
++// ============================================================================
++// Optimized Selection Update
++// ============================================================================
++
++void copy_mode_update_selection(int start_line, int start_col, int end_line, int end_col) {
++    copy_mode_state_t* state = &g_copy_state;
++    
++    // Mark only changed lines as dirty
++    int old_start = state->selection_start_line;
++    int old_end = state->selection_end_line;
++    int new_start = start_line;
++    int new_end = end_line;
++    
++    // Mark old selection lines as dirty (to clear highlighting)
++    for (int line = old_start; line <= old_end; line++) {
++        mark_dirty(&state->dirty, line);
++    }
++    
++    // Mark new selection lines as dirty (to add highlighting)
++    for (int line = new_start; line <= new_end; line++) {
++        mark_dirty(&state->dirty, line);
++    }
++    
++    // Update selection state
++    state->selection_start_line = start_line;
++    state->selection_start_col = start_col;
++    state->selection_end_line = end_line;
++    state->selection_end_col = end_col;
++    
++    // Trigger incremental render
++    render_selection_incremental(state);
++}
++
++// ============================================================================
++// Fast Search with Boyer-Moore
++// ============================================================================
++
++static void build_bad_char_table(const char* pattern, size_t len, int table[256]) {
++    // Initialize all characters to pattern length
++    for (int i = 0; i < 256; i++) {
++        table[i] = len;
++    }
++    
++    // Fill actual values
++    for (size_t i = 0; i < len - 1; i++) {
++        table[(unsigned char)pattern[i]] = len - i - 1;
++    }
++}
++
++int copy_mode_search_optimized(const char* pattern, size_t pattern_len) {
++    int bad_char[256];
++    build_bad_char_table(pattern, pattern_len, bad_char);
++    
++    copy_mode_state_t* state = &g_copy_state;
++    
++    // Search only in visible area first
++    for (int line = state->dirty.visible_start; line <= state->dirty.visible_end; line++) {
++        const char* text = state->lines[line];
++        size_t text_len = strlen(text);
++        
++        // Boyer-Moore search
++        size_t shift = 0;
++        while (shift <= text_len - pattern_len) {
++            int j = pattern_len - 1;
++            
++            while (j >= 0 && pattern[j] == text[shift + j]) {
++                j--;
++            }
++            
++            if (j < 0) {
++                // Found match
++                mark_dirty(&state->dirty, line);
++                return line;
++            } else {
++                shift += bad_char[(unsigned char)text[shift + j]];
++            }
++        }
++    }
++    
++    return -1;  // Not found
++}
++
++// ============================================================================
++// Render Buffer Management
++// ============================================================================
++
++static inline void ensure_render_buffer(copy_mode_state_t* state, size_t required) {
++    if (unlikely(state->render_buffer_size < required)) {
++        free(state->render_buffer);
++        state->render_buffer_size = required * 2;  // Double for growth
++        state->render_buffer = aligned_alloc(CACHE_LINE_SIZE, state->render_buffer_size);
++    }
++}
++
++// ============================================================================
++// Public API
++// ============================================================================
++
++void copy_mode_init(void) {
++    copy_mode_state_t* state = &g_copy_state;
++    
++    // Pre-allocate buffers
++    state->render_buffer_size = 65536;  // 64KB initial
++    state->render_buffer = aligned_alloc(CACHE_LINE_SIZE, state->render_buffer_size);
++    
++    // Initialize dirty tracking
++    clear_dirty(&state->dirty);
++    state->dirty.visible_start = 0;
++    state->dirty.visible_end = 50;  // Typical terminal height
++}
++
++void copy_mode_scroll(int lines) {
++    copy_mode_state_t* state = &g_copy_state;
++    
++    int old_start = state->dirty.visible_start;
++    int old_end = state->dirty.visible_end;
++    
++    state->dirty.visible_start += lines;
++    state->dirty.visible_end += lines;
++    
++    // Mark only newly visible lines as dirty
++    if (lines > 0) {
++        // Scrolling down
++        for (int line = old_end + 1; line <= state->dirty.visible_end; line++) {
++            mark_dirty(&state->dirty, line);
++        }
++    } else {
++        // Scrolling up
++        for (int line = state->dirty.visible_start; line < old_start; line++) {
++            mark_dirty(&state->dirty, line);
++        }
++    }
++    
++    render_selection_incremental(state);
++}

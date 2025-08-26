@@ -1,0 +1,267 @@
+# Alerts Configuration for tmux-Ghostty Integration
+# Prometheus AlertManager rules
+
+groups:
+  - name: tmux_ghostty_performance
+    interval: 10s
+    rules:
+      # Event Loop Performance Alerts
+      - alert: EventLoopHighLatency
+        expr: tmux_ghostty_event_loop_latency_ms_max > 0.5
+        for: 1m
+        labels:
+          severity: warning
+          component: event_loop
+        annotations:
+          summary: "Event loop latency exceeds target (instance {{ $labels.instance }})"
+          description: "Event loop P99 latency is {{ $value }}ms (target: <0.5ms)"
+          
+      - alert: EventLoopCriticalLatency
+        expr: tmux_ghostty_event_loop_latency_ms_max > 1.0
+        for: 30s
+        labels:
+          severity: critical
+          component: event_loop
+        annotations:
+          summary: "Critical event loop latency detected"
+          description: "Event loop latency {{ $value }}ms severely impacts user experience"
+      
+      - alert: EventLoopThroughputLow
+        expr: rate(tmux_ghostty_event_loop_ops_total[5m]) < 100000
+        for: 2m
+        labels:
+          severity: warning
+          component: event_loop
+        annotations:
+          summary: "Event loop throughput below target"
+          description: "Processing only {{ $value }} ops/sec (target: >200k)"
+      
+      # FFI Bridge Alerts
+      - alert: FFIOverheadHigh
+        expr: tmux_ghostty_ffi_overhead_ms_avg > 0.1
+        for: 1m
+        labels:
+          severity: warning
+          component: ffi_bridge
+        annotations:
+          summary: "FFI overhead exceeding limits"
+          description: "FFI call overhead is {{ $value }}ms (target: <0.1ms)"
+      
+      - alert: FFICallSpike
+        expr: rate(tmux_ghostty_ffi_calls_total[1m]) > 1000000
+        for: 30s
+        labels:
+          severity: warning
+          component: ffi_bridge
+        annotations:
+          summary: "Unusually high FFI call rate"
+          description: "FFI calls at {{ $value }}/sec may indicate inefficiency"
+      
+      # Memory Alerts
+      - alert: MemoryLeak
+        expr: rate(tmux_ghostty_memory_usage_bytes[5m]) > 1048576
+        for: 5m
+        labels:
+          severity: critical
+          component: memory
+        annotations:
+          summary: "Potential memory leak detected"
+          description: "Memory growing at {{ $value }} bytes/sec continuously"
+      
+      - alert: HighMemoryUsage
+        expr: tmux_ghostty_memory_usage_bytes > 536870912
+        for: 2m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "High memory usage"
+          description: "Using {{ humanize $value }} of memory"
+      
+      - alert: MemoryAllocationImbalance
+        expr: |
+          (tmux_ghostty_memory_allocs_total - tmux_ghostty_memory_frees_total) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "Memory allocation imbalance"
+          description: "{{ $value }} more allocations than frees"
+      
+      # Grid Operations Alerts
+      - alert: GridBatchSizeInefficient
+        expr: histogram_quantile(0.5, tmux_ghostty_grid_batch_size) < 8
+        for: 2m
+        labels:
+          severity: warning
+          component: grid
+        annotations:
+          summary: "Grid batch size too small"
+          description: "Median batch size {{ $value }} is inefficient (target: >8)"
+      
+      - alert: GridDirtyCellsHigh
+        expr: rate(tmux_ghostty_grid_dirty_cells_total[5m]) > 1000000
+        for: 1m
+        labels:
+          severity: warning
+          component: grid
+        annotations:
+          summary: "Excessive grid updates"
+          description: "{{ $value }} dirty cells/sec indicates rendering inefficiency"
+      
+      # Layout Manager Alerts
+      - alert: LayoutSwitchSlow
+        expr: rate(tmux_ghostty_layout_switches_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: info
+          component: layout
+        annotations:
+          summary: "Frequent layout switches"
+          description: "{{ $value }} layout switches/sec may impact performance"
+      
+      # Error Rate Alerts
+      - alert: ErrorRateHigh
+        expr: rate(tmux_ghostty_errors_total[5m]) > 1
+        for: 1m
+        labels:
+          severity: warning
+          component: general
+        annotations:
+          summary: "High error rate detected"
+          description: "{{ $value }} errors/sec requires investigation"
+      
+      - alert: ErrorRateCritical
+        expr: rate(tmux_ghostty_errors_total[5m]) > 10
+        for: 30s
+        labels:
+          severity: critical
+          component: general
+        annotations:
+          summary: "Critical error rate"
+          description: "{{ $value }} errors/sec - system stability at risk"
+      
+      # Process Health Alerts
+      - alert: CPUUsageHigh
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+          component: process
+        annotations:
+          summary: "High CPU usage"
+          description: "Process using {{ $value }}% CPU"
+      
+      - alert: ThreadCountHigh
+        expr: process_threads > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: process
+        annotations:
+          summary: "High thread count"
+          description: "{{ $value }} threads active"
+      
+      - alert: FileDescriptorLeak
+        expr: process_open_fds > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: process
+        annotations:
+          summary: "Potential file descriptor leak"
+          description: "{{ $value }} open file descriptors"
+      
+  - name: tmux_ghostty_availability
+    interval: 30s
+    rules:
+      - alert: ComponentDown
+        expr: up{job="tmux_ghostty"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: availability
+        annotations:
+          summary: "tmux-Ghostty component is down"
+          description: "Component {{ $labels.instance }} has been down for 1 minute"
+      
+      - alert: MetricsExporterDown
+        expr: up{job="prometheus"} == 0
+        for: 30s
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Metrics exporter is not responding"
+          description: "Cannot collect metrics from {{ $labels.instance }}"
+
+# Alert routing configuration (for AlertManager)
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'default'
+  
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical'
+      continue: true
+      
+    - match:
+        severity: warning
+      receiver: 'warning'
+      continue: true
+      
+    - match:
+        component: memory
+      receiver: 'memory-team'
+      
+    - match:
+        component: event_loop
+      receiver: 'performance-team'
+
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://localhost:5001/alerts'
+        send_resolved: true
+  
+  - name: 'critical'
+    webhook_configs:
+      - url: 'http://localhost:5001/critical'
+        send_resolved: true
+    pagerduty_configs:
+      - service_key: 'YOUR-PAGERDUTY-KEY'
+        severity: 'critical'
+  
+  - name: 'warning'
+    webhook_configs:
+      - url: 'http://localhost:5001/warning'
+        send_resolved: true
+  
+  - name: 'memory-team'
+    email_configs:
+      - to: 'memory-team@example.com'
+        from: 'alerts@tmux-ghostty.com'
+  
+  - name: 'performance-team'
+    email_configs:
+      - to: 'perf-team@example.com'
+        from: 'alerts@tmux-ghostty.com'
+
+# Inhibition rules - prevent alert storms
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+  
+  - source_match:
+      alertname: 'ComponentDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']

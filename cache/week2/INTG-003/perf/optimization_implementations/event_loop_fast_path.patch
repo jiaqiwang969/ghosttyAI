@@ -1,0 +1,215 @@
+diff --git a/cache/week2/CORE-001/src/event_loop_router.c b/cache/week2/CORE-001/src/event_loop_router.c
+index original..optimized 100644
+--- a/cache/week2/CORE-001/src/event_loop_router.c
++++ b/cache/week2/CORE-001/src/event_loop_router.c
+@@ -14,10 +14,44 @@
+ #include <event2/event.h>  // For libevent backend
+ #include "event_loop_backend.h"
+ 
++// ============================================================================
++// Performance Optimizations - Fast Path Implementation
++// ============================================================================
++
++// Compiler optimization hints
++#define likely(x)   __builtin_expect(!!(x), 1)
++#define unlikely(x) __builtin_expect(!!(x), 0)
++#define HOT_FUNCTION __attribute__((hot))
++#define COLD_FUNCTION __attribute__((cold))
++#define ALWAYS_INLINE __attribute__((always_inline)) inline
++
++// Cache optimization
++#define CACHE_LINE_SIZE 64
++#define CACHE_ALIGN __attribute__((aligned(CACHE_LINE_SIZE)))
++
++// Event pool for zero-allocation hot path
++#define EVENT_POOL_SIZE 2048
++#define EVENT_POOL_MASK (EVENT_POOL_SIZE - 1)
++
++typedef struct CACHE_ALIGN {
++    event_handle_t events[EVENT_POOL_SIZE];
++    uint32_t head;
++    uint32_t tail;
++    pthread_spinlock_t lock;  // Faster than mutex for short critical sections
++} event_pool_t;
++
++static event_pool_t g_event_pool;
++static int g_pool_initialized = 0;
++
+ // ============================================================================
+ // Thread Safety
+ // ============================================================================
+ 
++// Use RCU-style synchronization for reads
++#define RCU_READ_LOCK() __atomic_thread_fence(__ATOMIC_ACQUIRE)
++#define RCU_READ_UNLOCK() __atomic_thread_fence(__ATOMIC_RELEASE)
++
++// Padded locks to avoid false sharing
+ typedef struct {
+     pthread_mutex_t mutex;
+     pthread_rwlock_t mode_lock;
++    char padding[CACHE_LINE_SIZE - sizeof(pthread_mutex_t) - sizeof(pthread_rwlock_t)];
+ } router_locks_t;
+ 
+@@ -39,6 +73,56 @@ static void libevent_cleanup(void* base) {
+ }
+ 
++// OPTIMIZATION: Fast path for common case (libevent + initialized event)
++static ALWAYS_INLINE HOT_FUNCTION
++int libevent_event_add_fast(void* base, event_handle_t* handle, const struct timeval* timeout) {
++    // Most common case: event already initialized
++    if (likely(handle->backend_data != NULL)) {
++        struct event* ev = (struct event*)handle->backend_data;
++        
++        // Prefetch event structure for next access
++        __builtin_prefetch(ev, 0, 3);
++        
++        return event_add(ev, timeout);
++    }
++    
++    // Slow path: initialize event
++    return libevent_event_add(base, handle, timeout);
++}
++
++// OPTIMIZATION: Event pool management
++static void init_event_pool(void) {
++    if (__atomic_test_and_set(&g_pool_initialized, __ATOMIC_SEQ_CST)) {
++        return;  // Already initialized
++    }
++    
++    pthread_spin_init(&g_event_pool.lock, PTHREAD_PROCESS_PRIVATE);
++    g_event_pool.head = 0;
++    g_event_pool.tail = 0;
++    
++    // Pre-allocate and initialize events
++    for (int i = 0; i < EVENT_POOL_SIZE; i++) {
++        memset(&g_event_pool.events[i], 0, sizeof(event_handle_t));
++    }
++}
++
++static ALWAYS_INLINE event_handle_t* pool_get_event(void) {
++    pthread_spin_lock(&g_event_pool.lock);
++    
++    uint32_t head = g_event_pool.head;
++    uint32_t next_head = (head + 1) & EVENT_POOL_MASK;
++    
++    if (unlikely(next_head == g_event_pool.tail)) {
++        pthread_spin_unlock(&g_event_pool.lock);
++        return NULL;  // Pool empty
++    }
++    
++    event_handle_t* event = &g_event_pool.events[head];
++    g_event_pool.head = next_head;
++    
++    pthread_spin_unlock(&g_event_pool.lock);
++    return event;
++}
++
+ static int libevent_event_add(void* base, event_handle_t* handle, const struct timeval* timeout) {
+     struct event* ev = (struct event*)handle->backend_data;
+     if (!ev) {
+@@ -107,16 +191,24 @@ static event_loop_vtable_t libevent_vtable = {
+ // Router Implementation
+ // ============================================================================
+ 
++// OPTIMIZATION: Hot/cold path separation
++static HOT_FUNCTION
+ event_loop_router_t* event_loop_router_init(router_mode_t mode) {
+-    event_loop_router_t* router = calloc(1, sizeof(event_loop_router_t));
++    // Aligned allocation for better cache performance
++    event_loop_router_t* router = NULL;
++    if (posix_memalign((void**)&router, CACHE_LINE_SIZE, sizeof(event_loop_router_t)) != 0) {
++        return NULL;
++    }
++    memset(router, 0, sizeof(event_loop_router_t));
++    
+     if (!router) return NULL;
+     
+     router->mode = mode;
+     
+-    // Initialize locks
+-    router->mutex = malloc(sizeof(router_locks_t));
++    // Initialize locks with cache alignment
++    router->mutex = aligned_alloc(CACHE_LINE_SIZE, sizeof(router_locks_t));
+     if (router->mutex) {
+         router_locks_t* locks = (router_locks_t*)router->mutex;
+         pthread_mutex_init(&locks->mutex, NULL);
+         pthread_rwlock_init(&locks->mode_lock, NULL);
+     }
+@@ -133,12 +225,45 @@ event_loop_router_t* event_loop_router_init(router_mode_t mode) {
+             break;
+     }
+     
++    // Initialize event pool
++    init_event_pool();
++    
+     return router;
+ }
+ 
++// OPTIMIZATION: Direct dispatch for hot path
++static ALWAYS_INLINE HOT_FUNCTION
++int event_loop_add_optimized(event_loop_router_t* router, 
++                             event_handle_t* handle,
++                             const struct timeval* timeout) {
++    // Fast path: libevent mode (most common)
++    if (likely(router->mode == ROUTER_MODE_LIBEVENT)) {
++        return libevent_event_add_fast(router->backend_base, handle, timeout);
++    }
++    
++    // Slow path: use vtable
++    return router->vtable->event_add(router->backend_base, handle, timeout);
++}
++
++// OPTIMIZATION: Batch event processing
++int event_loop_add_batch(event_loop_router_t* router,
++                         event_handle_t** handles,
++                         const struct timeval** timeouts,
++                         size_t count) {
++    // Process in batches to improve cache locality
++    for (size_t i = 0; i < count; i++) {
++        // Prefetch next event
++        if (i + 1 < count) {
++            __builtin_prefetch(handles[i + 1], 0, 1);
++        }
++        
++        if (event_loop_add_optimized(router, handles[i], timeouts[i]) != 0) {
++            return -1;
++        }
++    }
++    return 0;
++}
++
+ // Public API implementation
+ int event_loop_add(event_loop_router_t* router, event_handle_t* handle, 
+                   const struct timeval* timeout) {
+-    return router->vtable->event_add(router->backend_base, handle, timeout);
++    return event_loop_add_optimized(router, handle, timeout);
+ }
+ 
+@@ -150,6 +275,27 @@ int event_loop_del(event_loop_router_t* router, event_handle_t* handle) {
++// OPTIMIZATION: Profile-guided optimization hints
++void event_loop_hint_hot_event(event_loop_router_t* router, event_handle_t* handle) {
++    // Hint that this event will be frequently accessed
++    __builtin_prefetch(handle, 1, 3);  // Prefetch for write with high temporal locality
++    
++    // Move to front of cache
++    if (handle->backend_data) {
++        __builtin_prefetch(handle->backend_data, 1, 3);
++    }
++}
++
++// OPTIMIZATION: Lock-free statistics update
++void event_loop_update_stats_lockfree(event_loop_router_t* router) {
++    __atomic_fetch_add(&router->stats.events_dispatched, 1, __ATOMIC_RELAXED);
++    __atomic_fetch_add(&router->stats.loop_iterations, 1, __ATOMIC_RELAXED);
++    
++    uint64_t now = get_time_ns();
++    uint64_t latency = now - router->last_dispatch_time_ns;
++    __atomic_store_n(&router->last_dispatch_time_ns, now, __ATOMIC_RELAXED);
++    __atomic_fetch_add(&router->stats.total_latency_ns, latency, __ATOMIC_RELAXED);
++}
++
+ int event_loop_run(event_loop_router_t* router, int flags) {
++    // Update stats without lock
++    event_loop_update_stats_lockfree(router);
+     return router->vtable->loop(router->backend_base, flags);
+ }
