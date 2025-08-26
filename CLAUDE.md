@@ -1,30 +1,49 @@
-# CLAUDE-v0.1.md - Ghostty × tmux Integration Agent Orchestration Handbook
+# CLAUDE-v0.2.md - Ghostty × tmux Integration Agent Orchestration Handbook
 
-## 📍 CRITICAL NAVIGATION - START HERE
-**All agents MUST read this first**: `/docs/README-目录说明.md`
-- Complete documentation structure explanation
-- Where to find YOUR specific tasks
-- How different document types connect
-- Daily workflow guidance
+## 🚨 WEEK 3 CRITICAL UPDATE - REAL INTEGRATION PHASE
+**Status**: Week 2 prototypes 100% complete in cache/week2/  
+**Next Phase**: Real source code integration into tmux/ and ghostty/  
+**Resource Reuse**: 60% code from Week 2 directly reusable  
 
-### 🗺️ Agent Navigation Flowchart
+## 📍 WEEK 3 CONSTRUCTION PLAN - START HERE
+**All agents MUST read these documents in order**:
+
+### 🎯 Week 3 Essential Documents
+1. **总览**: `/第三周-施工方案/第三周施工方案总览.md` - Overall plan and objectives
+2. **资源**: `/第三周-施工方案/资源复用清单.md` - What you can reuse from Week 1/2
+3. **执行**: `/第三周-施工方案/Agent执行手册.md` - YOUR specific instructions
+4. **快速**: `/第三周-施工方案/快速启动检查清单.md` - Quick reference and troubleshooting
+
+### 🗺️ Week 3 Agent Navigation Flowchart
 ```
-START HERE
+WEEK 3 START
     ↓
-[1] Read /docs/README-目录说明.md (5 min)
+[1] Read /第三周-施工方案/第三周施工方案总览.md (10 min)
     ↓
-[2] Check your role in Agent Hierarchy below
+[2] Check /第三周-施工方案/资源复用清单.md for your reusable assets
     ↓
-[3] Go to /docs/任务清单/第一周/[YOUR-ROLE].md
+[3] Find YOUR role in /第三周-施工方案/Agent执行手册.md
     ↓
-[4] Set up cache/week1/[YOUR-ROLE]/ workspace
+[4] Verify prerequisites in /第三周-施工方案/快速启动检查清单.md
     ↓
-[5] Review /docs/architecture-view/ for your component
+[5] Copy relevant Week 2 code from cache/week2/[YOUR-MODULE]/
     ↓
-[6] Follow /docs/new-architecture-施工图/ for implementation
+[6] Begin real source integration (tmux/ or ghostty/)
     ↓
-[7] Daily: Report to PM via cache/week1/[ROLE]/daily-reports/
+[7] Test and validate against Week 2 baseline (380k ops/s)
 ```
+
+### 📊 Week 2 Achievements (Baseline for Week 3)
+- **Performance**: 380k ops/s (90% above target)
+- **Test Coverage**: 91% with 47 passing tests
+- **Core Components**: Event loop (0.8% overhead), SIMD grid ops (10x), Zero-copy FFI (<100ns)
+- **Location**: All in cache/week2/ ready for integration
+
+## 📍 LEGACY NAVIGATION (Week 1 Reference)
+**Original guidance**: `/docs/README-目录说明.md`
+- Week 1 task lists in `/docs/任务清单/第一周/`
+- Architecture views in `/docs/architecture-view/`
+- Construction blueprint in `/docs/new-architecture-施工图/`
 
 ## ⚠️ CRITICAL: Claude Startup in Tmux
 
@@ -58,11 +77,26 @@ The Ghostty × tmux Integration project aims to compile tmux as a library (libtm
         └── [ROLE]/         # Your experiments, NOT production code
 ```
 
-### ⚠️ IMPORTANT: Cache vs Source
-- **cache/**: Your TDD experimental workspace - write tests, try implementations
-- **tmux/**: READ-ONLY production tmux source - analyze but don't modify directly
-- **ghostty/**: READ-ONLY production Ghostty source - analyze but don't modify directly
-- **Final code**: After PM validation, moves from cache → proper source location
+### ⚠️ WEEK 3 CRITICAL: Real Source Integration
+- **cache/week2/**: Your VALIDATED prototypes (100% complete, 91% tested)
+- **tmux/**: NOW MODIFY - Add backend router to tty.c (line 1234)
+- **ghostty/**: NOW MODIFY - Add tmux integration to src/tmux/
+- **Migration Path**: cache/week2/ → real source files (60% code reusable)
+
+### 🔄 Week 3 Resource Reuse Map
+```
+cache/week2/CORE-001/src/event_loop_backend.h (8KB)
+    ↓ COPY TO
+tmux/ui_backend/event_loop_backend.h
+
+cache/week2/INTG-001/callbacks.zig (31KB)
+    ↓ COPY TO
+ghostty/src/tmux/callbacks.zig
+
+cache/week2/CORE-002/grid_operations_neon.c (45KB)
+    ↓ INTEGRATE INTO
+tmux/grid_simd.c
+```
 
 ## 🏗️ Agent System Architecture
 
@@ -170,8 +204,33 @@ The Ghostty × tmux Integration project aims to compile tmux as a library (libtm
 
 ## 📚 Documentation Quick Reference
 
-### Essential Documents for Each Agent
+### Week 3 Essential Documents for Each Agent
 
+| Agent Type | Week 3 Task Location | Reusable Week 2 Code | Target Source Files |
+|------------|---------------------|---------------------|-------------------|
+| **c-tmux-specialist** | `/第三周-施工方案/Agent执行手册.md#CORE-001` | `cache/week2/CORE-001/src/event_loop_backend.h` | `tmux/tty.c:1234` |
+| **libtmux-core-developer** | `/第三周-施工方案/Agent执行手册.md#CORE-002` | `cache/week2/CORE-002/src/grid_operations_neon.c` | `tmux/Makefile.libtmuxcore` |
+| **zig-ghostty-integration** | `/第三周-施工方案/Agent执行手册.md#INTG-001` | `cache/week2/INTG-001/callbacks.zig (31KB)` | `ghostty/src/tmux/` |
+| **integration-dev** | `/第三周-施工方案/Agent执行手册.md#INTG-002` | `cache/week2/INTG-002/terminal_integration_poc.zig` | `ghostty/src/terminal/Terminal.zig` |
+| **qa-test-engineer** | `/第三周-施工方案/Agent执行手册.md#QA-002` | `cache/week2/TESTS/ (91% coverage)` | Integration testing |
+
+### Week 3 Performance Baseline (MUST MAINTAIN)
+```yaml
+From Week 2:
+  Throughput: 380k ops/s
+  Event Loop Overhead: 0.8%
+  FFI Latency: <100ns
+  Memory per Session: 8.3MB
+  Test Coverage: 91%
+  
+Week 3 Requirements:
+  Performance Degradation: <5%
+  All Tests Must Pass
+  No Memory Leaks
+  Backward Compatible
+```
+
+### Legacy Week 1 Documents (Reference)
 | Agent Type | Primary Task Doc | Source Code to Analyze | Work Directory |
 |------------|-----------------|------------------------|----------------|
 | **c-tmux-specialist** | `/docs/任务清单/第一周/CORE-001.md` | `tmux/tty.c`, `tmux/screen-write.c` | `cache/week1/CORE-001/` |
@@ -445,9 +504,9 @@ cd /Users/jqwang/98-ghosttyAI/cache/week1/[YOUR-ROLE]/
 # This is your sandbox for TDD development
 ```
 
-## 🚀 Daily Agent Coordination
+## 🚀 Week 3 Daily Agent Coordination
 
-### Morning Deployment (09:00)
+### Morning Deployment (09:00) - Week 3 Version
 
 ```bash
 # Start Claude agents with REQUIRED flag
@@ -456,13 +515,31 @@ for window in 0 4; do
   sleep 5
 done
 
-# PM deploys daily tasks to agents
+# PM deploys Week 3 tasks to agents
 for agent in c-tmux-specialist libtmux-core-developer zig-ghostty-integration; do
-  tmux send-keys -t [session:window] "DAILY TASK: Review /docs/任务清单/第一周/
-  Focus on today's acceptance criteria
-  Write tests first, then implement
+  tmux send-keys -t [session:window] "WEEK 3 TASK: 
+  1. Read /第三周-施工方案/Agent执行手册.md
+  2. Copy your Week 2 code from cache/week2/
+  3. Begin REAL source integration
+  4. Maintain performance baseline (380k ops/s)
   Report progress by 17:00" Enter
 done
+```
+
+### Week 3 Specific Commands
+
+```bash
+# For CORE-001: Copy Week 2 vtable to tmux
+cp cache/week2/CORE-001/src/event_loop_backend.h tmux/ui_backend/
+
+# For CORE-002: Build dynamic library
+cd tmux && make -f Makefile.libtmuxcore
+
+# For INTG-001: Copy FFI to Ghostty
+cp cache/week2/INTG-001/callbacks.zig ghostty/src/tmux/
+
+# For QA-002: Validate integration
+cd tests/week3 && ./run_integration_tests.sh
 ```
 
 ### Status Collection (17:00)
@@ -474,68 +551,70 @@ for session in ghostty-core ghostty-integration ghostty-quality; do
 done
 ```
 
-## 📈 Success Metrics by Agent Type
+## 📈 Week 3 Success Metrics by Agent Type
 
-| Agent | Primary Metric | Target | Measurement |
-|-------|---------------|--------|-------------|
-| c-tmux-specialist | Hook extraction | 100% tty_cmd_* | Count functions |
-| libtmux-core-developer | Library compilation | Clean build | No warnings |
-| zig-ghostty-integration | FFI safety | Zero unsafe | Zig compiler |
-| qa-test-engineer | Test coverage | >80% new | lcov/gcov |
-| devops-engineer-ops001 | Build time | <2 min | Time command |
-| system-architect | Design approval | 100% reviewed | PM validation |
+| Agent | Week 3 Primary Goal | Success Metric | Validation |
+|-------|-------------------|---------------|------------|
+| c-tmux-specialist | Modify real tty.c | Backend router working | tmux compiles with -DLIBTMUXCORE_BUILD |
+| libtmux-core-developer | Build libtmuxcore.so | Dynamic library loads | ldd shows correct symbols |
+| zig-ghostty-integration | Integrate FFI to Ghostty | src/tmux/ compiles | zig build succeeds |
+| integration-dev | Connect Terminal.zig | tmux commands work | Basic new/split functional |
+| qa-test-engineer | Validate integration | 85%+ coverage maintained | No performance regression |
+| system-architect | Review integration | Architecture approved | No design violations |
 
-## 🔧 Agent-Specific Tools and Commands
+## 🔧 Week 3 Agent-Specific Tools and Commands
 
-### For C/tmux Agents (Analyzing tmux source)
+### For C/tmux Agents (NOW MODIFYING tmux source)
 ```bash
-# Navigate to tmux source
+# Week 3: MODIFY tmux source
 cd /Users/jqwang/98-ghosttyAI/tmux/
 
-# Analysis commands (READ-ONLY)
-grep -r "tty_cmd_" .           # Find all tty command functions
-grep -r "tty_write" .           # Find output points
-ctags -R .                      # Generate tags for navigation
-cscope -b -R                    # Build cscope database
+# Copy Week 2 prototypes
+cp ~/98-ghosttyAI/cache/week2/CORE-001/src/event_loop_backend.h ui_backend/
+cp ~/98-ghosttyAI/cache/week2/CORE-002/src/grid_operations_neon.c .
 
-# Count functions to extract
-grep -c "tty_cmd_" tty.c       # Count hooks needed
+# Modify tty.c (line 1234)
+vim tty.c
+# Add: #ifdef LIBTMUXCORE_BUILD ... #endif
 
-# Your experiments in cache
-cd /Users/jqwang/98-ghosttyAI/cache/week1/CORE-001/
-gcc -Wall -Wextra -c tests/test.c  # Compile your tests
-valgrind --leak-check=full ./test  # Check memory leaks
+# Build dynamic library
+make -f Makefile.libtmuxcore
+nm -D libtmuxcore.so | grep tmc_  # Verify symbols
 ```
 
-### For Zig Integration Agents (Analyzing Ghostty source)
+### For Zig Integration Agents (NOW MODIFYING Ghostty)
 ```bash
-# Navigate to Ghostty source
+# Week 3: CREATE tmux integration
 cd /Users/jqwang/98-ghosttyAI/ghostty/
 
-# Analysis commands (READ-ONLY)
-find src -name "*.zig" | xargs grep "terminal"
-cat build.zig                   # Understand build process
-zig fmt --check src/            # Check code style
+# Create tmux module
+mkdir -p src/tmux
+cp ~/98-ghosttyAI/cache/week2/INTG-001/callbacks.zig src/tmux/
+cp ~/98-ghosttyAI/cache/week2/INTG-001/ffi_safety.zig src/tmux/
 
-# Your experiments in cache
-cd /Users/jqwang/98-ghosttyAI/cache/week1/INTG-001/
-zig build-lib -dynamic wip/ffi_bridge.zig
-zig test tests/test_ffi.zig
+# Update build.zig
+vim build.zig
+# Add: exe.linkSystemLibrary("tmuxcore");
+
+# Build with tmux support
+zig build
 ```
 
-### For QA Agents (Testing both sources)
+### For QA Agents (Testing REAL Integration)
 ```bash
-# Analyze both code bases
+# Week 3: Test real binaries
 cd /Users/jqwang/98-ghosttyAI/
-find tmux -name "*.c" | wc -l   # Count C files
-find ghostty -name "*.zig" | wc -l  # Count Zig files
 
-# Your test suites in cache
-cd /Users/jqwang/98-ghosttyAI/cache/week1/QA-001/
-make -C tests test
-gcov *.c
-lcov --capture --directory . --output-file coverage.info
-genhtml coverage.info --output-directory coverage_html
+# Copy Week 2 test suite
+cp -r cache/week2/TESTS/ tests/week3/
+
+# Test dynamic library
+ldd tmux/libtmuxcore.so
+./tests/week3/integration_test
+
+# Performance validation
+./tests/week3/benchmark | grep ops/s
+# Must be >350k ops/s (Week 2: 380k)
 ```
 
 ## 🎮 Emergency Agent Management
@@ -566,15 +645,28 @@ tmux send-keys -t [session:window] "git add -A && git commit -m 'WIP: Switching 
 tmux send-keys -t [session:window] "NEW TASK: [description]" Enter
 ```
 
-## 📝 Agent Performance Review
+## 📝 Week 3 Agent Performance Review
 
-Weekly review for each agent:
-1. Task completion rate
-2. Test coverage achieved
-3. Code quality metrics
-4. Communication effectiveness
-5. Git discipline adherence
+### Week 3 Key Achievements to Date
+1. **Week 1 (85% Complete)**: Design documents, POC code, architecture decisions
+2. **Week 2 (100% Complete)**: Prototypes validated, 380k ops/s, 91% test coverage
+3. **Week 3 (Starting Now)**: Real source integration - tmux/tty.c + ghostty/src/tmux/
+
+### Critical Week 3 Success Factors
+- **60% code reusable** from cache/week2/
+- **Performance baseline**: 380k ops/s (max 5% degradation allowed)
+- **Test coverage**: Maintain 91% from Week 2
+- **Integration path**: cache/week2/ → real source files
+
+### Week 3 Deliverables
+1. libtmuxcore.so dynamic library (from static .a)
+2. Modified tmux/tty.c with backend router
+3. New ghostty/src/tmux/ integration module
+4. End-to-end integration tests passing
+5. Performance within 5% of baseline
 
 ---
 
 **Remember**: Each specialized agent has unique expertise. Deploy the right agent for the right task. The Project Manager coordinates execution while Architect and DevOps remain independent consultants.
+
+**WEEK 3 MOTTO**: "Not reinventing, but integrating. 60% is already done!"
