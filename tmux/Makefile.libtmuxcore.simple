@@ -1,0 +1,60 @@
+# Makefile.libtmuxcore - Build libtmuxcore dynamic library (simplified)
+# Date: 2025-08-26
+# Task: T-302-R - Build libtmuxcore.so
+
+# Compiler and flags
+CC = gcc
+AR = ar
+CFLAGS = -fPIC -DLIBTMUXCORE_BUILD -I. -I/opt/homebrew/include \
+         -I/opt/homebrew/Cellar/libevent/2.1.12_1/include \
+         -I/opt/homebrew/Cellar/utf8proc/2.10.0/include \
+         -std=gnu99 -O2 -g
+
+# Platform detection
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    LIBEXT = dylib
+    LDFLAGS = -dynamiclib -install_name @rpath/libtmuxcore.dylib
+else
+    LIBEXT = so
+    LDFLAGS = -shared -Wl,-soname,libtmuxcore.so.1
+endif
+
+# Library files
+LIB_NAME = libtmuxcore
+LIB_FILE = $(LIB_NAME).$(LIBEXT)
+
+# For now, just build UI backend components and main API
+OBJS = libtmuxcore.o \
+       ui_backend/ui_backend.o \
+       ui_backend/event_loop_router_stub.o
+
+# Default target
+all: $(LIB_FILE)
+
+# Build the dynamic library
+$(LIB_FILE): $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+	@echo "Built $(LIB_FILE) successfully!"
+
+# Pattern rule for object files
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Clean target
+clean:
+	rm -f $(OBJS) $(LIB_FILE)
+
+# Test the library
+test: $(LIB_FILE)
+	@echo "Testing library..."
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		otool -L $(LIB_FILE); \
+		nm -gU $(LIB_FILE) | grep ui_backend; \
+	else \
+		ldd $(LIB_FILE); \
+		nm -D $(LIB_FILE) | grep ui_backend; \
+	fi
+	@echo "Library test complete!"
+
+.PHONY: all clean test

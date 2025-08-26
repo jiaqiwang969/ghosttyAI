@@ -1,0 +1,111 @@
+# Makefile.libtmuxcore - Build libtmuxcore dynamic library
+# Date: 2025-08-26
+# Task: T-302-R - Build libtmuxcore.so
+
+# Compiler and flags
+CC = gcc
+CFLAGS = -fPIC -DLIBTMUXCORE_BUILD -I. -I/opt/homebrew/Cellar/libevent/2.1.12_1/include \
+         -I/opt/homebrew/Cellar/utf8proc/2.10.0/include -DUTF8PROC_EXPORTS \
+         -D_DARWIN_C_SOURCE -std=gnu99 -O2 -g
+LDFLAGS = -shared -dynamiclib -install_name @rpath/libtmuxcore.dylib
+
+# Version info
+VERSION_MAJOR = 1
+VERSION_MINOR = 0
+VERSION_PATCH = 0
+VERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
+
+# Library name (macOS uses .dylib instead of .so)
+LIB_NAME = libtmuxcore
+LIB_FILE = $(LIB_NAME).$(VERSION).dylib
+LIB_SONAME = $(LIB_NAME).$(VERSION_MAJOR).dylib
+LIB_LINK = $(LIB_NAME).dylib
+
+# Core tmux objects needed for library
+CORE_OBJS = \
+    tty.o \
+    grid.o \
+    grid-view.o \
+    grid-reader.o \
+    screen.o \
+    screen-write.o \
+    screen-redraw.o \
+    window.o \
+    session.o \
+    tmux.o \
+    options.o \
+    options-table.o \
+    colour.o \
+    attributes.o \
+    utf8.o \
+    utf8-combined.o \
+    input.o \
+    input-keys.o \
+    key-string.o \
+    key-bindings.o \
+    cmd.o \
+    cmd-parse.o \
+    format.o \
+    format-draw.o \
+    paste.o \
+    style.o
+
+# UI backend objects
+BACKEND_OBJS = \
+    ui_backend/ui_backend.o \
+    ui_backend/event_loop_router_stub.o
+
+# All objects
+ALL_OBJS = $(CORE_OBJS) $(BACKEND_OBJS)
+
+# Default target
+all: $(LIB_FILE)
+
+# Build the dynamic library
+$(LIB_FILE): $(ALL_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+	ln -sf $(LIB_FILE) $(LIB_SONAME)
+	ln -sf $(LIB_SONAME) $(LIB_LINK)
+
+# Pattern rule for object files
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# UI backend objects
+ui_backend/%.o: ui_backend/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Install target
+install: $(LIB_FILE)
+	install -d /usr/local/lib
+	install -m 755 $(LIB_FILE) /usr/local/lib/
+	ln -sf $(LIB_FILE) /usr/local/lib/$(LIB_SONAME)
+	ln -sf $(LIB_SONAME) /usr/local/lib/$(LIB_LINK)
+	install -d /usr/local/include/tmux
+	install -m 644 ui_backend/*.h /usr/local/include/tmux/
+
+# Symbol export file for controlling visibility
+$(LIB_NAME).sym: 
+	@echo "# Symbol export file for libtmuxcore" > $@
+	@echo "_tmc_init" >> $@
+	@echo "_tmc_cleanup" >> $@
+	@echo "_tmc_create_session" >> $@
+	@echo "_tmc_destroy_session" >> $@
+	@echo "_tmc_register_callbacks" >> $@
+	@echo "_ui_backend_*" >> $@
+	@echo "_event_loop_*" >> $@
+
+# Clean target
+clean:
+	rm -f $(ALL_OBJS) $(LIB_FILE) $(LIB_SONAME) $(LIB_LINK)
+	rm -f $(LIB_NAME).sym
+
+# Test the library can be loaded
+test: $(LIB_FILE)
+	@echo "Testing library loading..."
+	@otool -L $(LIB_FILE)
+	@echo "Library symbols:"
+	@nm -gU $(LIB_FILE) | head -20
+	@echo "Library built successfully!"
+
+.PHONY: all clean install test

@@ -33,6 +33,10 @@
 
 #include "tmux.h"
 
+#ifdef LIBTMUXCORE_BUILD
+#include "ui_backend/ui_backend.h"
+#endif
+
 static int	tty_log_fd = -1;
 
 static void	tty_set_italics(struct tty *);
@@ -1733,6 +1737,17 @@ tty_write(void (*cmdfn)(struct tty *, const struct tty_ctx *),
 {
 	struct client	*c;
 	int		 state;
+
+#ifdef LIBTMUXCORE_BUILD
+	/* Route to UI backend if enabled */
+	if (ui_backend_enabled()) {
+		ui_backend_t* backend = ui_backend_get_instance();
+		if (backend && ui_backend_dispatch(backend, cmdfn, ctx) == 0) {
+			return; /* Backend handled the command */
+		}
+		/* Fall through to original path if backend didn't handle it */
+	}
+#endif
 
 	if (ctx->set_client_cb == NULL)
 		return;
