@@ -75,25 +75,24 @@ void ui_backend_cleanup(void) {
     #endif
 }
 
+// Declare the enhanced dispatch function from ui_backend_dispatch.c
+extern int ui_backend_dispatch_enhanced(ui_backend_t* backend,
+                                       void (*cmdfn)(struct tty *, const struct tty_ctx *),
+                                       struct tty_ctx* ctx);
+
 // Dispatch tty command through UI backend
 int ui_backend_dispatch(ui_backend_t* backend, 
                         void (*cmdfn)(struct tty *, const struct tty_ctx *),
                         struct tty_ctx* ctx) {
     #ifdef LIBTMUXCORE_BUILD
-    (void)backend; // Suppress unused warning
-    (void)cmdfn;   // Suppress unused warning
-    (void)ctx;     // Suppress unused warning
-    
     if (!g_backend.enabled || g_backend.router == NULL) {
         return -1;
     }
     
-    // In GHOSTTY mode, we would call the Ghostty callbacks here
-    // For now, we just return success to indicate the backend handled it
+    // In GHOSTTY mode, use the enhanced dispatch that recognizes commands
     if (g_backend.router->mode == ROUTER_MODE_GHOSTTY) {
-        // TODO: Implement actual Ghostty callback dispatch
-        // This will be connected to the FFI bridge in T-303-R
-        return 0;
+        // Week 4 enhancement: Use the real dispatch implementation
+        return ui_backend_dispatch_enhanced(backend, cmdfn, ctx);
     }
     
     // In LIBEVENT or HYBRID mode, return -1 to use original path
