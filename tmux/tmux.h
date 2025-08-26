@@ -127,6 +127,35 @@ struct winlink;
 #define VISUAL_ON 1
 #define VISUAL_BOTH 2
 
+#ifdef LIBTMUXCORE_BUILD
+/* UI Backend command IDs for dispatch */
+enum {
+	UI_CMD_UNKNOWN = 0,
+	UI_CMD_CELL = 1,
+	UI_CMD_CLEARLINE = 2,
+	UI_CMD_CLEARSCREEN = 3,
+	UI_CMD_INSERTLINE = 4,
+	UI_CMD_DELETELINE = 5,
+	UI_CMD_CLEARENDOFLINE = 6,
+	UI_CMD_CLEARENDOFSCREEN = 7,
+	UI_CMD_CLEARSTARTOFSCREEN = 8,
+	UI_CMD_REVERSEINDEX = 9,
+	UI_CMD_LINEFEED = 10,
+	UI_CMD_SCROLLUP = 11,
+	UI_CMD_SCROLLDOWN = 12,
+	UI_CMD_INSERTCHARACTER = 13,
+	UI_CMD_DELETECHARACTER = 14,
+	UI_CMD_CLEARCHARACTER = 15,
+	UI_CMD_CELLS = 16,
+	UI_CMD_SIXELIMAGE = 17,
+	UI_CMD_SYNCSTART = 18,
+	UI_CMD_RAWSTRING = 19,
+	UI_CMD_SETSELECTION = 20,
+	UI_CMD_ALIGNMENTTEST = 21,
+	UI_CMD_MAX
+};
+#endif
+
 /* No key or unknown key. */
 #define KEYC_NONE            0x000ff000000000ULL
 #define KEYC_UNKNOWN         0x000fe000000000ULL
@@ -1657,6 +1686,11 @@ struct tty_ctx {
 	u_int			 woy;
 	u_int			 wsx;
 	u_int			 wsy;
+
+#ifdef LIBTMUXCORE_BUILD
+	/* UI Backend command ID for dispatch */
+	int			 ui_cmd_id;
+#endif
 };
 
 /* Saved message entry. */

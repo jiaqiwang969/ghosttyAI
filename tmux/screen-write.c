@@ -218,6 +218,9 @@ screen_write_initctx(struct screen_write_ctx *ctx, struct tty_ctx *ttyctx,
 				ttyctx->num = sync;
 		} else
 			ttyctx->num = 0x10|sync;
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_SYNCSTART;
+#endif
 		tty_write(tty_cmd_syncstart, ttyctx);
 		ctx->flags |= SCREEN_WRITE_SYNC;
 	}
@@ -592,7 +595,13 @@ screen_write_fast_copy(struct screen_write_ctx *ctx, struct screen *src,
 			grid_view_set_cell(ctx->s->grid, s->cx, s->cy, &gc);
 			if (wp != NULL) {
 				ttyctx.cell = &gc;
-				tty_write(tty_cmd_cell, &ttyctx);
+#ifdef LIBTMUXCORE_BUILD
+				ttyctx.ui_cmd_id = UI_CMD_CELL;
+#endif
+		#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_CELL;
+#endif
+		tty_write(tty_cmd_cell, &ttyctx);
 				ttyctx.ocx++;
 			}
 			s->cx++;
@@ -1042,6 +1051,9 @@ screen_write_alignmenttest(struct screen_write_ctx *ctx)
 	screen_write_initctx(ctx, &ttyctx, 1);
 
 	screen_write_collect_clear(ctx, 0, screen_size_y(s) - 1);
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_ALIGNMENTTEST;
+#endif
 	tty_write(tty_cmd_alignmenttest, &ttyctx);
 }
 
@@ -1075,6 +1087,9 @@ screen_write_insertcharacter(struct screen_write_ctx *ctx, u_int nx, u_int bg)
 
 	screen_write_collect_flush(ctx, 0, __func__);
 	ttyctx.num = nx;
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_INSERTCHARACTER;
+#endif
 	tty_write(tty_cmd_insertcharacter, &ttyctx);
 }
 
@@ -1108,6 +1123,9 @@ screen_write_deletecharacter(struct screen_write_ctx *ctx, u_int nx, u_int bg)
 
 	screen_write_collect_flush(ctx, 0, __func__);
 	ttyctx.num = nx;
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_DELETECHARACTER;
+#endif
 	tty_write(tty_cmd_deletecharacter, &ttyctx);
 }
 
@@ -1141,6 +1159,9 @@ screen_write_clearcharacter(struct screen_write_ctx *ctx, u_int nx, u_int bg)
 
 	screen_write_collect_flush(ctx, 0, __func__);
 	ttyctx.num = nx;
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CLEARCHARACTER;
+#endif
 	tty_write(tty_cmd_clearcharacter, &ttyctx);
 }
 
@@ -1177,6 +1198,9 @@ screen_write_insertline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 
 		screen_write_collect_flush(ctx, 0, __func__);
 		ttyctx.num = ny;
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_INSERTLINE;
+#endif
 		tty_write(tty_cmd_insertline, &ttyctx);
 		return;
 	}
@@ -1230,6 +1254,9 @@ screen_write_deleteline(struct screen_write_ctx *ctx, u_int ny, u_int bg)
 
 		screen_write_collect_flush(ctx, 0, __func__);
 		ttyctx.num = ny;
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_DELETELINE;
+#endif
 		tty_write(tty_cmd_deleteline, &ttyctx);
 		return;
 	}
@@ -1395,6 +1422,9 @@ screen_write_reverseindex(struct screen_write_ctx *ctx, u_int bg)
 		screen_write_initctx(ctx, &ttyctx, 1);
 		ttyctx.bg = bg;
 
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_REVERSEINDEX;
+#endif
 		tty_write(tty_cmd_reverseindex, &ttyctx);
 	} else if (s->cy > 0)
 		screen_write_set_cursor(ctx, -1, s->cy - 1);
@@ -1521,6 +1551,9 @@ screen_write_scrolldown(struct screen_write_ctx *ctx, u_int lines, u_int bg)
 
 	screen_write_collect_flush(ctx, 0, __func__);
 	ttyctx.num = lines;
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_SCROLLDOWN;
+#endif
 	tty_write(tty_cmd_scrolldown, &ttyctx);
 }
 
@@ -1563,6 +1596,9 @@ screen_write_clearendofscreen(struct screen_write_ctx *ctx, u_int bg)
 
 	screen_write_collect_clear(ctx, s->cy + 1, sy - (s->cy + 1));
 	screen_write_collect_flush(ctx, 0, __func__);
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CLEARENDOFSCREEN;
+#endif
 	tty_write(tty_cmd_clearendofscreen, &ttyctx);
 }
 
@@ -1591,6 +1627,9 @@ screen_write_clearstartofscreen(struct screen_write_ctx *ctx, u_int bg)
 
 	screen_write_collect_clear(ctx, 0, s->cy);
 	screen_write_collect_flush(ctx, 0, __func__);
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CLEARSTARTOFSCREEN;
+#endif
 	tty_write(tty_cmd_clearstartofscreen, &ttyctx);
 }
 
@@ -1619,6 +1658,9 @@ screen_write_clearscreen(struct screen_write_ctx *ctx, u_int bg)
 		grid_view_clear(s->grid, 0, 0, sx, sy, bg);
 
 	screen_write_collect_clear(ctx, 0, sy);
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CLEARSCREEN;
+#endif
 	tty_write(tty_cmd_clearscreen, &ttyctx);
 }
 
@@ -1791,6 +1833,9 @@ screen_write_collect_flush(struct screen_write_ctx *ctx, int scroll_only,
 		screen_write_initctx(ctx, &ttyctx, 1);
 		ttyctx.num = ctx->scrolled;
 		ttyctx.bg = ctx->bg;
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_SCROLLUP;
+#endif
 		tty_write(tty_cmd_scrollup, &ttyctx);
 
 		if (ctx->wp != NULL)
@@ -1816,13 +1861,19 @@ screen_write_collect_flush(struct screen_write_ctx *ctx, int scroll_only,
 				screen_write_initctx(ctx, &ttyctx, 1);
 				ttyctx.bg = ci->bg;
 				ttyctx.num = ci->used;
-				tty_write(tty_cmd_clearcharacter, &ttyctx);
+			#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CLEARCHARACTER;
+#endif
+	tty_write(tty_cmd_clearcharacter, &ttyctx);
 			} else {
 				screen_write_initctx(ctx, &ttyctx, 0);
 				ttyctx.cell = &ci->gc;
 				ttyctx.wrapped = ci->wrapped;
 				ttyctx.ptr = cl->data + ci->x;
 				ttyctx.num = ci->used;
+#ifdef LIBTMUXCORE_BUILD
+				ttyctx.ui_cmd_id = UI_CMD_CELLS;
+#endif
 				tty_write(tty_cmd_cells, &ttyctx);
 			}
 			items++;
@@ -2076,7 +2127,10 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 	if (s->mode & MODE_INSERT) {
 		screen_write_collect_flush(ctx, 0, __func__);
 		ttyctx.num = width;
-		tty_write(tty_cmd_insertcharacter, &ttyctx);
+	#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_INSERTCHARACTER;
+#endif
+	tty_write(tty_cmd_insertcharacter, &ttyctx);
 	}
 
 	/* Write to the screen. */
@@ -2086,6 +2140,9 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 			ttyctx.cell = &tmp_gc;
 		} else
 			ttyctx.cell = gc;
+#ifdef LIBTMUXCORE_BUILD
+		ttyctx.ui_cmd_id = UI_CMD_CELL;
+#endif
 		tty_write(tty_cmd_cell, &ttyctx);
 	}
 }
@@ -2194,6 +2251,9 @@ screen_write_combine(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 	screen_write_initctx(ctx, &ttyctx, 0);
 	ttyctx.cell = &last;
 	ttyctx.num = force_wide; /* reset cached cursor position */
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_CELL;
+#endif
 	tty_write(tty_cmd_cell, &ttyctx);
 	screen_write_set_cursor(ctx, cx, cy);
 
@@ -2284,6 +2344,9 @@ screen_write_setselection(struct screen_write_ctx *ctx, const char *flags,
 	ttyctx.ptr2 = (void *)flags;
 	ttyctx.num = len;
 
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_SETSELECTION;
+#endif
 	tty_write(tty_cmd_setselection, &ttyctx);
 }
 
@@ -2299,6 +2362,9 @@ screen_write_rawstring(struct screen_write_ctx *ctx, u_char *str, u_int len,
 	ttyctx.num = len;
 	ttyctx.allow_invisible_panes = allow_invisible_panes;
 
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_RAWSTRING;
+#endif
 	tty_write(tty_cmd_rawstring, &ttyctx);
 }
 
@@ -2355,6 +2421,9 @@ screen_write_sixelimage(struct screen_write_ctx *ctx, struct sixel_image *si,
 	screen_write_initctx(ctx, &ttyctx, 0);
 	ttyctx.ptr = image_store(s, si);
 
+#ifdef LIBTMUXCORE_BUILD
+	ttyctx.ui_cmd_id = UI_CMD_SIXELIMAGE;
+#endif
 	tty_write(tty_cmd_sixelimage, &ttyctx);
 
 	screen_write_cursormove(ctx, 0, cy + y, 0);

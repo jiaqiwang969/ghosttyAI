@@ -10,18 +10,29 @@
 
 // Command ID system to avoid unreliable function pointer comparison
 typedef enum {
-    TTY_CMD_UNKNOWN = 0,
-    TTY_CMD_CELL,
-    TTY_CMD_CLEARLINE,
-    TTY_CMD_CLEARSCREEN,
-    TTY_CMD_INSERTLINE,
-    TTY_CMD_DELETELINE,
-    TTY_CMD_CLEARENDOFLINE,
-    TTY_CMD_REVERSEINDEX,
-    TTY_CMD_LINEFEED,
-    TTY_CMD_SCROLLUP,
-    TTY_CMD_SCROLLDOWN,
-    TTY_CMD_MAX
+    UI_CMD_UNKNOWN = 0,
+    UI_CMD_CELL = 1,
+    UI_CMD_CLEARLINE = 2,
+    UI_CMD_CLEARSCREEN = 3,
+    UI_CMD_INSERTLINE = 4,
+    UI_CMD_DELETELINE = 5,
+    UI_CMD_CLEARENDOFLINE = 6,
+    UI_CMD_CLEARENDOFSCREEN = 7,
+    UI_CMD_CLEARSTARTOFSCREEN = 8,
+    UI_CMD_REVERSEINDEX = 9,
+    UI_CMD_LINEFEED = 10,
+    UI_CMD_SCROLLUP = 11,
+    UI_CMD_SCROLLDOWN = 12,
+    UI_CMD_INSERTCHARACTER = 13,
+    UI_CMD_DELETECHARACTER = 14,
+    UI_CMD_CLEARCHARACTER = 15,
+    UI_CMD_CELLS = 16,
+    UI_CMD_SIXELIMAGE = 17,
+    UI_CMD_SYNCSTART = 18,
+    UI_CMD_RAWSTRING = 19,
+    UI_CMD_SETSELECTION = 20,
+    UI_CMD_ALIGNMENTTEST = 21,
+    UI_CMD_MAX
 } tty_cmd_id_t;
 
 // Forward declarations for tty_cmd functions
@@ -49,18 +60,18 @@ static tty_cmd_id_t identify_command(void (*cmdfn)(struct tty *, const struct tt
     fprintf(stderr, "[IDENTIFY]   tty_cmd_clearscreen: %p\n", clearscreen_addr);
     
     // Try function pointer comparison first
-    if (cmdfn == tty_cmd_cell || cmdfn == cell_addr) return TTY_CMD_CELL;
-    if (cmdfn == tty_cmd_clearline || cmdfn == clearline_addr) return TTY_CMD_CLEARLINE;
-    if (cmdfn == tty_cmd_clearscreen || cmdfn == clearscreen_addr) return TTY_CMD_CLEARSCREEN;
-    if (cmdfn == tty_cmd_insertline) return TTY_CMD_INSERTLINE;
-    if (cmdfn == tty_cmd_deleteline) return TTY_CMD_DELETELINE;
-    if (cmdfn == tty_cmd_clearendofline) return TTY_CMD_CLEARENDOFLINE;
-    if (cmdfn == tty_cmd_reverseindex) return TTY_CMD_REVERSEINDEX;
-    if (cmdfn == tty_cmd_linefeed) return TTY_CMD_LINEFEED;
-    if (cmdfn == tty_cmd_scrollup) return TTY_CMD_SCROLLUP;
-    if (cmdfn == tty_cmd_scrolldown) return TTY_CMD_SCROLLDOWN;
+    if (cmdfn == tty_cmd_cell || cmdfn == cell_addr) return UI_CMD_CELL;
+    if (cmdfn == tty_cmd_clearline || cmdfn == clearline_addr) return UI_CMD_CLEARLINE;
+    if (cmdfn == tty_cmd_clearscreen || cmdfn == clearscreen_addr) return UI_CMD_CLEARSCREEN;
+    if (cmdfn == tty_cmd_insertline) return UI_CMD_INSERTLINE;
+    if (cmdfn == tty_cmd_deleteline) return UI_CMD_DELETELINE;
+    if (cmdfn == tty_cmd_clearendofline) return UI_CMD_CLEARENDOFLINE;
+    if (cmdfn == tty_cmd_reverseindex) return UI_CMD_REVERSEINDEX;
+    if (cmdfn == tty_cmd_linefeed) return UI_CMD_LINEFEED;
+    if (cmdfn == tty_cmd_scrollup) return UI_CMD_SCROLLUP;
+    if (cmdfn == tty_cmd_scrolldown) return UI_CMD_SCROLLDOWN;
     
-    return TTY_CMD_UNKNOWN;
+    return UI_CMD_UNKNOWN;
 }
 
 // Callback function table - this is the key missing part from Week 3
@@ -130,9 +141,9 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
     }
     
     // Try command ID from context first (more reliable if set)
-    tty_cmd_id_t cmd_id = TTY_CMD_UNKNOWN;
+    tty_cmd_id_t cmd_id = UI_CMD_UNKNOWN;
     
-    if (ctx->ui_cmd_id > 0 && ctx->ui_cmd_id < TTY_CMD_MAX) {
+    if (ctx->ui_cmd_id > 0 && ctx->ui_cmd_id < UI_CMD_MAX) {
         cmd_id = (tty_cmd_id_t)ctx->ui_cmd_id;
         debug_log("Using command ID from context: %d", cmd_id);
     } else {
@@ -145,7 +156,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
     
     // Process based on command ID instead of direct comparison
     switch (cmd_id) {
-    case TTY_CMD_CELL:
+    case UI_CMD_CELL:
         debug_log("Processing tty_cmd_cell");
         fprintf(stderr, "[DISPATCH] Processing tty_cmd_cell\n");
         
@@ -172,7 +183,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_CLEARLINE:
+    case UI_CMD_CLEARLINE:
         debug_log("Processing tty_cmd_clearline");
         fprintf(stderr, "[DISPATCH] Processing tty_cmd_clearline\n");
         
@@ -182,7 +193,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_CLEARSCREEN:
+    case UI_CMD_CLEARSCREEN:
         debug_log("Processing tty_cmd_clearscreen");
         fprintf(stderr, "[DISPATCH] Processing tty_cmd_clearscreen\n");
         
@@ -192,7 +203,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_INSERTLINE:
+    case UI_CMD_INSERTLINE:
         debug_log("Processing tty_cmd_insertline");
         
         if (g_callbacks.on_insert_line) {
@@ -201,7 +212,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_DELETELINE:
+    case UI_CMD_DELETELINE:
         debug_log("Processing tty_cmd_deleteline");
         
         if (g_callbacks.on_delete_line) {
@@ -210,7 +221,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_CLEARENDOFLINE:
+    case UI_CMD_CLEARENDOFLINE:
         debug_log("Processing tty_cmd_clearendofline");
         
         if (g_callbacks.on_clear_eol) {
@@ -219,7 +230,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_REVERSEINDEX:
+    case UI_CMD_REVERSEINDEX:
         debug_log("Processing tty_cmd_reverseindex");
         
         if (g_callbacks.on_reverse_index) {
@@ -228,7 +239,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_LINEFEED:
+    case UI_CMD_LINEFEED:
         debug_log("Processing tty_cmd_linefeed");
         
         if (g_callbacks.on_line_feed) {
@@ -237,7 +248,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_SCROLLUP:
+    case UI_CMD_SCROLLUP:
         debug_log("Processing tty_cmd_scrollup");
         
         if (g_callbacks.on_scroll_up) {
@@ -246,7 +257,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_SCROLLDOWN:
+    case UI_CMD_SCROLLDOWN:
         debug_log("Processing tty_cmd_scrolldown");
         
         if (g_callbacks.on_scroll_down) {
@@ -255,7 +266,7 @@ int ui_backend_dispatch_enhanced(ui_backend_t* backend,
         }
         break;
         
-    case TTY_CMD_UNKNOWN:
+    case UI_CMD_UNKNOWN:
     default:
         // Unknown command, log for debugging
         debug_log("Unknown tty command function: %p (ID: %d)", cmdfn, cmd_id);
