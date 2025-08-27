@@ -84,6 +84,10 @@ mouse: Mouse,
 /// Keyboard input state.
 keyboard: Keyboard,
 
+/// Command input buffer for collecting @send/@session commands
+/// This buffer collects characters until Enter is pressed
+command_buffer: std.ArrayList(u8),
+
 /// A currently pressed key. This is used so that we can send a keyboard
 /// release event when the surface is unfocused. Note that when the surface
 /// is refocused, a key press event may not be sent again -- this depends
@@ -140,6 +144,10 @@ focused: bool = true,
 
 /// Used to determine whether to continuously scroll.
 selection_scroll_active: bool = false,
+
+/// Session ID for terminal-to-terminal communication
+/// Generated from Surface pointer address for uniqueness
+session_id: [32]u8 = undefined,
 
 /// The effect of an input event. This can be used by callers to take
 /// the appropriate action after an input event. For example, key
@@ -522,6 +530,7 @@ pub fn init(
         .renderer_thr = undefined,
         .mouse = .{},
         .keyboard = .{},
+        .command_buffer = std.ArrayList(u8).init(alloc),
         .io = undefined,
         .io_thread = io_thread,
         .io_thr = undefined,
@@ -531,6 +540,9 @@ pub fn init(
         // Our conditional state is initialized to the app state. This
         // lets us get the most likely correct color theme and so on.
         .config_conditional_state = app.config_conditional_state,
+        
+        // Initialize session_id - will be set properly by App.addSurface
+        .session_id = undefined,
     };
 
     // The command we're going to execute
@@ -686,6 +698,9 @@ pub fn init(
 }
 
 pub fn deinit(self: *Surface) void {
+    // Clean up command buffer
+    self.command_buffer.deinit();
+    
     // Stop rendering thread
     {
         self.renderer_thread.stop.notify() catch |err|
@@ -2244,6 +2259,147 @@ pub fn keyCallback(
         break :event copy;
     };
 
+    // Check for @command BEFORE encoding the key
+    // This ensures nothing gets sent to PTY for @commands
+    if (event.action == .press) {
+        const building_command = self.command_buffer.items.len > 0 and 
+                                self.command_buffer.items[0] == '@';
+        
+        // Debug: log key events for @commands
+        if (building_command or (event.utf8.len > 0 and event.utf8[0] == '@')) {
+            log.info("keyCallback: key={s}, utf8={s}, building_command={}, buffer={s}", .{
+                @tagName(event.key), 
+                event.utf8, 
+                building_command,
+                self.command_buffer.items
+            });
+        }
+        
+        // Handle Enter key for @commands
+        if (building_command and (event.key == .enter or event.key == .numpad_enter)) {
+            const command = std.mem.trim(u8, self.command_buffer.items, " \r\n");
+            log.info("Processing @command: {s}", .{command});
+            
+            // Handle @session command
+            if (std.mem.eql(u8, command, "@session")) {
+                // Clear the buffer
+                self.command_buffer.clearRetainingCapacity();
+                
+                // Generate session ID from Surface pointer
+                var buf: [64]u8 = undefined;
+                const session_id = try std.fmt.bufPrint(&buf, "surface-{x}", .{@intFromPtr(self)});
+                
+                // Clear the command line and show response
+                var response_buf: [256]u8 = undefined;
+                const clear_len = command.len;
+                var spaces: [256]u8 = undefined;
+                @memset(spaces[0..clear_len], ' ');
+                
+                const response = try std.fmt.bufPrint(&response_buf, 
+                    "\r{s}\rSession ID: {s}\r\n", 
+                    .{spaces[0..clear_len], session_id});
+                const msg = try termio.Message.writeReq(self.alloc, response);
+                self.io.queueMessage(msg, .unlocked);
+                
+                return .consumed;
+            }
+            
+            // Handle @send command
+            if (std.mem.startsWith(u8, command, "@send ")) {
+                // Clear the buffer
+                self.command_buffer.clearRetainingCapacity();
+                
+                // Parse command
+                var iter = std.mem.tokenizeAny(u8, command[6..], " ");
+                const target_session = iter.next() orelse return .consumed;
+                
+                const rest_start = 6 + target_session.len + 1;
+                if (rest_start < command.len) {
+                    const cmd_to_send = command[rest_start..];
+                    
+                    // Clear and show response
+                    var response_buf: [512]u8 = undefined;
+                    const clear_len = command.len;
+                    var spaces: [256]u8 = undefined;
+                    @memset(spaces[0..clear_len], ' ');
+                    
+                    const response = try std.fmt.bufPrint(&response_buf, 
+                        "\r{s}\rWould send to {s}: {s}\r\n", 
+                        .{spaces[0..clear_len], target_session, cmd_to_send});
+                    const msg = try termio.Message.writeReq(self.alloc, response);
+                    self.io.queueMessage(msg, .unlocked);
+                }
+                
+                return .consumed;
+            }
+            
+            // Unknown @command - clear it
+            self.command_buffer.clearRetainingCapacity();
+            var response_buf: [256]u8 = undefined;
+            const clear_len = command.len;
+            var spaces: [256]u8 = undefined;
+            @memset(spaces[0..clear_len], ' ');
+            const response = try std.fmt.bufPrint(&response_buf, "\r{s}\r\n", .{spaces[0..clear_len]});
+            const msg = try termio.Message.writeReq(self.alloc, response);
+            self.io.queueMessage(msg, .unlocked);
+            
+            return .consumed;
+        }
+        
+        // Handle character collection for @commands
+        if (event.utf8.len > 0) {
+            // Check if this might be the start of a command
+            if (self.command_buffer.items.len == 0 and event.utf8[0] == '@') {
+                // Start collecting command
+                try self.command_buffer.appendSlice(event.utf8);
+                
+                // Echo the character to screen so user can see what they're typing
+                const echo_msg = try termio.Message.writeReq(self.alloc, event.utf8);
+                self.io.queueMessage(echo_msg, .unlocked);
+                
+                return .consumed; // Don't send @ to terminal via encodeKey
+            } else if (building_command) {
+                // Continue collecting command
+                try self.command_buffer.appendSlice(event.utf8);
+                
+                // Echo the character to screen so user can see what they're typing
+                const echo_msg = try termio.Message.writeReq(self.alloc, event.utf8);
+                self.io.queueMessage(echo_msg, .unlocked);
+                
+                return .consumed; // Don't send characters to terminal via encodeKey
+            }
+        }
+        
+        // Handle backspace for @commands
+        if (building_command and (event.key == .backspace or event.key == .delete)) {
+            if (self.command_buffer.items.len > 0) {
+                _ = self.command_buffer.pop();
+                
+                // Send backspace sequence to terminal to update display
+                const backspace_seq = "\x08 \x08"; // Move back, space, move back
+                const echo_msg = try termio.Message.writeReq(self.alloc, backspace_seq);
+                self.io.queueMessage(echo_msg, .unlocked);
+            }
+            return .consumed; // Don't send backspace to terminal via encodeKey
+        }
+        
+        // Clear buffer on escape
+        if (building_command and event.key == .escape) {
+            // Clear the displayed command
+            const clear_len = self.command_buffer.items.len;
+            if (clear_len > 0) {
+                var spaces: [256]u8 = undefined;
+                @memset(spaces[0..@min(clear_len, 256)], ' ');
+                var response_buf: [256]u8 = undefined;
+                const response = try std.fmt.bufPrint(&response_buf, "\r{s}\r", .{spaces[0..@min(clear_len, 256)]});
+                const msg = try termio.Message.writeReq(self.alloc, response);
+                self.io.queueMessage(msg, .unlocked);
+            }
+            self.command_buffer.clearRetainingCapacity();
+            return .consumed;
+        }
+    }
+
     // Encode and send our key. If we didn't encode anything, then we
     // return the effect as ignored.
     if (try self.encodeKey(
@@ -2256,6 +2412,16 @@ pub fn keyCallback(
         if (self.child_exited) {
             self.close();
             return .closed;
+        }
+
+        // At this point, we've already handled @commands above, so just clear
+        // any stale buffer if we're not building a command
+        if (event.action == .press) {
+            const building_command = self.command_buffer.items.len > 0 and 
+                                    self.command_buffer.items[0] == '@';
+            if (!building_command and self.command_buffer.items.len > 0) {
+                self.command_buffer.clearRetainingCapacity();
+            }
         }
 
         errdefer write_req.deinit();
@@ -5143,6 +5309,61 @@ fn completeClipboardPaste(
     allow_unsafe: bool,
 ) !void {
     if (data.len == 0) return;
+    
+    // Check for @send command before processing
+    if (std.mem.startsWith(u8, data, "@send ")) {
+        // Parse the @send command: @send <session-id> <command>
+        // Find the first space after "@send "
+        const after_send = data[6..]; // Skip "@send "
+        
+        // Find the end of session ID (next space)
+        const session_end = std.mem.indexOfScalar(u8, after_send, ' ') orelse {
+            log.warn("@send command missing command text", .{});
+            return;
+        };
+        
+        const session_id = after_send[0..session_end];
+        const command = std.mem.trim(u8, after_send[session_end + 1..], " \r\n");
+        
+        if (command.len == 0) {
+            log.warn("@send command has empty command text", .{});
+            return;
+        }
+        
+        // Need to allocate stable memory for the command since we're passing it async
+        const cmd_copy = try self.alloc.dupe(u8, command);
+        const session_copy = try self.alloc.dupe(u8, session_id);
+        
+        // Send to the App mailbox for routing
+        _ = self.app.mailbox.push(.{
+            .send_to_session = .{
+                .from_surface = self,
+                .session_id = session_copy,
+                .command = cmd_copy,
+                .wait_response = false,
+            },
+        }, .{ .ns = 100_000_000 });
+        
+        log.info("Intercepted @send command to {s}: {s}", .{ session_id, command });
+        return;
+    }
+    
+    // Check for @session command to show current session ID
+    if (std.mem.eql(u8, std.mem.trim(u8, data, " \r\n"), "@session")) {
+        // Generate and display the session ID
+        var session_id_buf: [64]u8 = undefined;
+        const session_msg = std.fmt.bufPrint(&session_id_buf, "\r\nSession ID: surface-{x}\r\n", .{@intFromPtr(self)}) catch {
+            log.warn("Failed to format session ID", .{});
+            return;
+        };
+        
+        // Write the session ID back to the terminal
+        self.io.queueMessage(try termio.Message.writeReq(
+            self.alloc,
+            session_msg,
+        ), .unlocked);
+        return;
+    }
 
     const critical: struct {
         bracketed: bool,

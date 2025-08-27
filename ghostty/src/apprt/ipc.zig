@@ -67,6 +67,9 @@ pub const Action = union(enum) {
 
     /// The arguments to pass to Ghostty as the command.
     new_window: NewWindow,
+    
+    /// Send command to another session for terminal-to-terminal communication
+    send_to_session: SendToSession,
 
     pub const NewWindow = struct {
         /// A list of command arguments to launch in the new window. If this is
@@ -104,10 +107,45 @@ pub const Action = union(enum) {
             return result;
         }
     };
+    
+    pub const SendToSession = struct {
+        /// The target session ID to send the command to
+        session_id: [:0]const u8,
+        
+        /// The command to send to the target session
+        command: [:0]const u8,
+        
+        /// Whether to wait for a response (future feature)
+        wait_response: bool = false,
+        
+        pub const C = extern struct {
+            // Pack both strings into a single allocation
+            // Format: session_id\0command\0
+            data: [*:0]const u8,
+        };
+        
+        pub fn cval(self: *SendToSession, alloc: Allocator) Allocator.Error!SendToSession.C {
+            // Allocate space for both strings plus two null terminators
+            const total_len = self.session_id.len + 1 + self.command.len + 1;
+            const buffer = try alloc.alloc(u8, total_len);
+            
+            // Copy session_id
+            @memcpy(buffer[0..self.session_id.len], self.session_id);
+            buffer[self.session_id.len] = 0;
+            
+            // Copy command
+            const cmd_start = self.session_id.len + 1;
+            @memcpy(buffer[cmd_start..cmd_start + self.command.len], self.command);
+            buffer[cmd_start + self.command.len] = 0;
+            
+            return .{ .data = buffer.ptr };
+        }
+    };
 
     /// Sync with: ghostty_ipc_action_tag_e
     pub const Key = enum(c_uint) {
         new_window,
+        send_to_session,
     };
 
     /// Sync with: ghostty_ipc_action_u

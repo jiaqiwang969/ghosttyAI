@@ -20,10 +20,12 @@ const font = @import("font/main.zig");
 const internal_os = @import("os/main.zig");
 const macos = @import("macos");
 const objc = @import("objc");
+const termio = @import("termio.zig");
 
 const log = std.log.scoped(.app);
 
 const SurfaceList = std.ArrayListUnmanaged(*apprt.Surface);
+const SessionManager = @import("terminal/SessionManager.zig");
 
 /// General purpose allocator
 alloc: Allocator,
@@ -74,6 +76,9 @@ config_conditional_state: configpkg.ConditionalState,
 /// if they are the first surface.
 first: bool = true,
 
+/// Session manager for terminal-to-terminal communication
+session_manager: SessionManager,
+
 pub const CreateError = Allocator.Error || font.SharedGridSet.InitError;
 
 /// Create a new app instance. This returns a stable pointer to the app
@@ -104,6 +109,7 @@ pub fn init(
         .mailbox = .{},
         .font_grid_set = font_grid_set,
         .config_conditional_state = .{},
+        .session_manager = SessionManager.init(alloc),
     };
 }
 
@@ -111,6 +117,9 @@ pub fn deinit(self: *App) void {
     // Clean up all our surfaces
     for (self.surfaces.items) |surface| surface.deinit();
     self.surfaces.deinit(self.alloc);
+
+    // Clean up session manager
+    self.session_manager.deinit();
 
     // Clean up our font group cache
     // We should have zero items in the grid set at this point because
@@ -175,6 +184,18 @@ pub fn addSurface(
 ) Allocator.Error!void {
     try self.surfaces.append(self.alloc, rt_surface);
 
+    // Generate a unique session ID based on Surface pointer
+    var session_id_buf: [32]u8 = undefined;
+    const session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(rt_surface.core())}) catch "surface-unknown";
+    
+    // Set the session_id in the Surface itself
+    @memcpy(&rt_surface.core().session_id, session_id_buf[0..32]);
+    
+    // Register surface with session manager
+    self.session_manager.registerSession(session_id, rt_surface.core(), false) catch |err| {
+        log.warn("Failed to register surface with SessionManager: {any}", .{err});
+    };
+
     // Since we have non-zero surfaces, we can cancel the quit timer.
     // It is up to the apprt if there is a quit timer at all and if it
     // should be canceled.
@@ -190,6 +211,11 @@ pub fn addSurface(
 /// Delete the surface from the known surface list. This will NOT call the
 /// destructor or free the memory.
 pub fn deleteSurface(self: *App, rt_surface: *apprt.Surface) void {
+    // Unregister from session manager
+    var session_id_buf: [32]u8 = undefined;
+    const session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(rt_surface.core())}) catch "surface-unknown";
+    self.session_manager.unregisterSession(session_id);
+
     // If this surface is the focused surface then we need to clear it.
     // There was a bug where we relied on hasSurface to return false and
     // just let focused surface be but the allocator was reusing addresses
@@ -250,6 +276,7 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
             .redraw_surface => |surface| try self.redrawSurface(rt_app, surface),
             .redraw_inspector => |surface| self.redrawInspector(rt_app, surface),
+            .send_to_session => |msg| try self.sendToSession(msg),
 
             // If we're quitting, then we set the quit flag and stop
             // draining the mailbox immediately. This lets us defer
@@ -291,6 +318,38 @@ fn redrawSurface(
 fn redrawInspector(self: *App, rt_app: *apprt.App, surface: *apprt.Surface) void {
     if (!self.hasRtSurface(surface)) return;
     rt_app.redrawInspector(surface);
+}
+
+/// Send a command to another terminal session
+fn sendToSession(self: *App, msg: anytype) !void {
+    // Find the target surface by matching session_id
+    var target_surface: ?*Surface = null;
+    for (self.surfaces.items) |rt_surface| {
+        const surface = rt_surface.core();
+        
+        // Build session ID for comparison
+        var session_id_buf: [32]u8 = undefined;
+        const surface_session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(surface)}) catch continue;
+        
+        if (std.mem.eql(u8, surface_session_id, msg.session_id)) {
+            target_surface = surface;
+            break;
+        }
+    }
+    
+    if (target_surface == null) {
+        log.warn("Target session not found: {s}", .{msg.session_id});
+        return;
+    }
+
+    // Send the command to the target terminal's PTY via its termio queue
+    const target = target_surface.?;
+    target.io.queueMessage(try termio.Message.writeReq(
+        self.alloc,
+        msg.command,
+    ), .unlocked);
+    
+    log.info("Sent command to session {s}: {s}", .{ msg.session_id, msg.command });
 }
 
 /// Create a new window
@@ -548,6 +607,14 @@ pub const Message = union(enum) {
     /// Redraw the inspector. This is called whenever some non-OS event
     /// causes the inspector to need to be redrawn.
     redraw_inspector: *apprt.Surface,
+
+    /// Send a command to another terminal session
+    send_to_session: struct {
+        from_surface: ?*Surface,
+        session_id: []const u8,
+        command: []const u8,
+        wait_response: bool = false,
+    },
 
     const NewWindow = struct {
         /// The parent surface

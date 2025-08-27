@@ -108,7 +108,7 @@ pub fn registerSession(
     
     try self.sessions.put(id_copy, info);
     
-    std.log.info("Registered session: {s} (remote: {})", .{ 
+    std.log.info("Registered session: {s} (remote: {any})", .{ 
         id, 
         is_remote 
     });
@@ -175,7 +175,7 @@ pub fn sendToSession(
     
     try self.message_queue.append(msg);
     
-    std.log.debug("Message queued: {s} -> {s} ({} bytes)", .{
+    std.log.debug("Message queued: {s} -> {s} ({d} bytes)", .{
         from_id,
         target_id,
         data.len,
@@ -222,7 +222,7 @@ pub fn linkSessions(
     
     try self.links.append(link);
     
-    std.log.info("Sessions linked: {s} {} {s}", .{
+    std.log.info("Sessions linked: {s} {s} {s}", .{
         source_id,
         if (bidirectional) "<->" else "->",
         target_id,
@@ -277,7 +277,7 @@ pub fn listSessions(self: *SessionManager, writer: anytype) !void {
         const age_ms = std.time.milliTimestamp() - info.created_time;
         const age_sec = @divFloor(age_ms, 1000);
         
-        try writer.print("  {s} [{}{}] - Age: {}s, Sent: {}, Recv: {}\n", .{
+        try writer.print("  {s} [{s}{s}] - Age: {d}s, Sent: {d}, Recv: {d}\n", .{
             info.id,
             if (info.is_remote) "R" else "L",
             if (self.isSessionLinked(info.id)) "*" else " ",
@@ -291,7 +291,7 @@ pub fn listSessions(self: *SessionManager, writer: anytype) !void {
         try writer.print("\nActive Links:\n", .{});
         try writer.print("=============\n", .{});
         for (self.links.items) |link| {
-            try writer.print("  {s} {} {s}\n", .{
+            try writer.print("  {s} {s} {s}\n", .{
                 link.source,
                 if (link.bidirectional) "<->" else "->",
                 link.target,
