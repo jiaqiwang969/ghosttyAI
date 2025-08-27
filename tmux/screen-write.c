@@ -23,6 +23,11 @@
 
 #include "tmux.h"
 
+#ifdef LIBTMUXCORE_BUILD
+#include "ui_backend/ui_backend.h"
+extern struct ui_backend_vtable *ui_backend;
+#endif
+
 static struct screen_write_citem *screen_write_collect_trim(
 		    struct screen_write_ctx *, u_int, u_int, u_int, int *);
 static void	screen_write_collect_clear(struct screen_write_ctx *, u_int,
@@ -1386,6 +1391,12 @@ screen_write_cursormove(struct screen_write_ctx *ctx, int px, int py,
     int origin)
 {
 	struct screen	*s = ctx->s;
+
+#ifdef LIBTMUXCORE_BUILD
+	if (ui_backend && ui_backend->move_cursor) {
+		ui_backend->move_cursor(px, py);
+	}
+#endif
 
 	if (origin && py != -1 && (s->mode & MODE_ORIGIN)) {
 		if ((u_int)py > s->rlower - s->rupper)

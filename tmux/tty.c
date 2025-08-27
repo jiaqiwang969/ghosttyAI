@@ -1740,12 +1740,9 @@ tty_write(void (*cmdfn)(struct tty *, const struct tty_ctx *),
 
 #ifdef LIBTMUXCORE_BUILD
 	/* Route to UI backend if enabled */
-	if (ui_backend_enabled()) {
-		ui_backend_t* backend = ui_backend_get_instance();
-		if (backend && ui_backend_dispatch(backend, cmdfn, ctx) == 0) {
-			return; /* Backend handled the command */
-		}
-		/* Fall through to original path if backend didn't handle it */
+	if (ui_backend && ui_backend->handle_output) {
+		ui_backend->handle_output(ctx);
+		return; /* Backend handled the command */
 	}
 #endif
 

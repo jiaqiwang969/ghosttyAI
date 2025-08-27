@@ -27,9 +27,6 @@ const windows = internal_os.windows;
 const configpkg = @import("../config.zig");
 const shell_integration = @import("shell_integration.zig");
 
-
-// tmux integration (added for deep integration)
-const tmux = @import("../tmux/tmux_integration.zig");
 const log = std.log.scoped(.io_exec);
 
 /// Allocator
@@ -73,9 +70,6 @@ terminal_stream: terminalpkg.Stream(StreamHandler),
 /// flooding with cursor resets.
 last_cursor_reset: ?std.time.Instant = null,
 
-
-/// tmux integration handle (optional)
-tmux_handle: ?*tmux.TmuxHandle = null,
 /// State we have for thread enter. This may be null if we don't need
 /// to keep track of any state or if its already been freed.
 thread_enter_state: ?*ThreadEnterState = null,
@@ -327,29 +321,10 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
             break :stream s;
         },
         .thread_enter_state = thread_enter_state,
-        .tmux_handle = null, // Initialize to null
     };
-    
-    // Initialize tmux integration after self is fully set up
-    {
-        log.info("Initializing deep tmux integration...", .{});
-        self.tmux_handle = try alloc.create(tmux.TmuxHandle);
-        errdefer {
-            if (self.tmux_handle) |h| alloc.destroy(h);
-        }
-        self.tmux_handle.?.* = try tmux.TmuxHandle.init(alloc, &self.terminal);
-        try self.tmux_handle.?.setupCallbacks();
-        log.info("tmux deep integration enabled - @tmux commands available", .{});
-    }
 }
 
 pub fn deinit(self: *Termio) void {
-    // Cleanup tmux integration first
-    if (self.tmux_handle) |handle| {
-        handle.deinit();
-        self.alloc.destroy(handle);
-    }
-    
     self.backend.deinit();
     self.terminal.deinit(self.alloc);
     self.config.deinit();
@@ -453,11 +428,6 @@ pub inline fn queueWrite(
     data: []const u8,
     linefeed: bool,
 ) !void {
-    // Check if this is a tmux command before sending to pty
-    if (self.handleTmuxCommand(data)) {
-        return; // Command handled by tmux
-    }
-    
     try self.backend.queueWrite(self.alloc, td, data, linefeed);
 }
 
@@ -796,21 +766,3 @@ pub const ThreadData = struct {
         self.* = undefined;
     }
 };
-
-
-/// Handle tmux commands (deep integration)
-pub fn handleTmuxCommand(self: *Termio, input: []const u8) bool {
-    // Check for @tmux prefix
-    if (std.mem.startsWith(u8, input, "@tmux ")) {
-        const cmd = input[6..];
-        
-        if (self.tmux_handle) |handle| {
-            handle.executeCommand(cmd) catch |err| {
-                log.err("tmux command failed: {}", .{err});
-                return false;
-            };
-            return true;
-        }
-    }
-    return false;
-}
