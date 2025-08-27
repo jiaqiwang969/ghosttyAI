@@ -11,6 +11,9 @@
 //! (i.e. with focus, without focus, and so on).
 const Surface = @This();
 
+// Command prefix for Ghostty terminal communication
+const CMD_PREFIX = "@ghostty";
+
 const apprt = @import("apprt.zig");
 pub const Mailbox = apprt.surface.Mailbox;
 pub const Message = apprt.surface.Message;
@@ -84,7 +87,7 @@ mouse: Mouse,
 /// Keyboard input state.
 keyboard: Keyboard,
 
-/// Command input buffer for collecting @send/@session commands
+/// Command input buffer for collecting @ghostty commands
 /// This buffer collects characters until Enter is pressed
 command_buffer: std.ArrayList(u8),
 
@@ -743,6 +746,37 @@ pub fn deinit(self: *Surface) void {
     self.config.deinit();
 
     log.info("surface closed addr={x}", .{@intFromPtr(self)});
+}
+
+/// Overlay display helpers for command input
+/// Use preedit mechanism to show command buffer content as overlay
+fn overlayShow(self: *Surface) void {
+    // Display current command buffer content as overlay text
+    self.preeditCallback(self.command_buffer.items) catch {};
+}
+
+fn overlayClear(self: *Surface) void {
+    // Clear the overlay display
+    self.preeditCallback(null) catch {};
+}
+
+/// Enter/exit capture mode for @ghostty commands
+fn enterCapture(self: *Surface) void {
+    // Enable keyboard disable mode to prevent any leakage to PTY
+    self.renderer_state.mutex.lock();
+    self.io.terminal.modes.set(.disable_keyboard, true);
+    self.renderer_state.mutex.unlock();
+}
+
+fn exitCapture(self: *Surface) void {
+    // Restore normal keyboard mode and clear command state
+    self.renderer_state.mutex.lock();
+    self.io.terminal.modes.set(.disable_keyboard, false);
+    self.renderer_state.mutex.unlock();
+    
+    // Clear command buffer and overlay
+    self.command_buffer.clearRetainingCapacity();
+    self.overlayClear();
 }
 
 /// Close this surface. This will trigger the runtime to start the
@@ -2259,143 +2293,148 @@ pub fn keyCallback(
         break :event copy;
     };
 
-    // Check for @command BEFORE encoding the key
-    // This ensures nothing gets sent to PTY for @commands
+    // NEW: Overlay-based @ghostty command capture system
+    // This completely replaces the old PTY-based approach
     if (event.action == .press) {
-        const building_command = self.command_buffer.items.len > 0 and 
-                                self.command_buffer.items[0] == '@';
-        
-        // Debug: log key events for @commands
-        if (building_command or (event.utf8.len > 0 and event.utf8[0] == '@')) {
-            log.info("keyCallback: key={s}, utf8={s}, building_command={}, buffer={s}", .{
-                @tagName(event.key), 
-                event.utf8, 
-                building_command,
-                self.command_buffer.items
-            });
+        const buf = self.command_buffer.items;
+        const capturing = (buf.len > 0 and buf[0] == '@');
+
+        // Start capture: see '@' and not currently capturing
+        if (!capturing and event.utf8.len > 0 and event.utf8[0] == '@') {
+            self.command_buffer.clearRetainingCapacity();
+            try self.command_buffer.appendSlice(event.utf8);
+            self.enterCapture();
+            self.overlayShow();
+            return .consumed; // Don't go to encodeKey, don't write PTY
         }
-        
-        // Handle Enter key for @commands
-        if (building_command and (event.key == .enter or event.key == .numpad_enter)) {
-            const command = std.mem.trim(u8, self.command_buffer.items, " \r\n");
-            log.info("Processing @command: {s}", .{command});
-            
-            // Handle @session command
-            if (std.mem.eql(u8, command, "@session")) {
-                // Clear the buffer
-                self.command_buffer.clearRetainingCapacity();
-                
-                // Generate session ID from Surface pointer
-                var buf: [64]u8 = undefined;
-                const session_id = try std.fmt.bufPrint(&buf, "surface-{x}", .{@intFromPtr(self)});
-                
-                // Clear the command line and show response
-                var response_buf: [256]u8 = undefined;
-                const clear_len = command.len;
-                var spaces: [256]u8 = undefined;
-                @memset(spaces[0..clear_len], ' ');
-                
-                const response = try std.fmt.bufPrint(&response_buf, 
-                    "\r{s}\rSession ID: {s}\r\n", 
-                    .{spaces[0..clear_len], session_id});
-                const msg = try termio.Message.writeReq(self.alloc, response);
-                self.io.queueMessage(msg, .unlocked);
-                
-                return .consumed;
-            }
-            
-            // Handle @send command
-            if (std.mem.startsWith(u8, command, "@send ")) {
-                // Clear the buffer
-                self.command_buffer.clearRetainingCapacity();
-                
-                // Parse command
-                var iter = std.mem.tokenizeAny(u8, command[6..], " ");
-                const target_session = iter.next() orelse return .consumed;
-                
-                const rest_start = 6 + target_session.len + 1;
-                if (rest_start < command.len) {
-                    const cmd_to_send = command[rest_start..];
+
+        // In capture mode: handle editing keys
+        if (capturing) {
+            // Enter: submit command
+            if (event.key == .enter or event.key == .numpad_enter) {
+                const line = std.mem.trim(u8, buf, " \r\n");
+
+                if (std.mem.eql(u8, line, CMD_PREFIX)) {
+                    // Just "@ghostty" - show help
+                    self.renderer_state.mutex.lock();
+                    defer self.renderer_state.mutex.unlock();
+                    const t: *terminal.Terminal = self.renderer_state.terminal;
+                    t.carriageReturn();
+                    t.linefeed() catch {};
+                    t.printString("Ghostty command mode. Try: @ghostty send <session> <text>") catch {};
+                    t.linefeed() catch {};
+                } else if (std.mem.startsWith(u8, line, CMD_PREFIX ++ " ")) {
+                    // Parse subcommands like "@ghostty send ..."
+                    const subcmd = line[CMD_PREFIX.len + 1..];
                     
-                    // Clear and show response
-                    var response_buf: [512]u8 = undefined;
-                    const clear_len = command.len;
-                    var spaces: [256]u8 = undefined;
-                    @memset(spaces[0..clear_len], ' ');
+                    log.info("Processing subcommand: '{s}'", .{subcmd});
                     
-                    const response = try std.fmt.bufPrint(&response_buf, 
-                        "\r{s}\rWould send to {s}: {s}\r\n", 
-                        .{spaces[0..clear_len], target_session, cmd_to_send});
-                    const msg = try termio.Message.writeReq(self.alloc, response);
-                    self.io.queueMessage(msg, .unlocked);
+                    if (std.mem.startsWith(u8, subcmd, "send ")) {
+                        // Parse: @ghostty send <session> <command>
+                        var iter = std.mem.tokenizeAny(u8, subcmd[5..], " ");
+                        const target_session = iter.next();
+                        
+                        if (target_session == null) {
+                            self.renderer_state.mutex.lock();
+                            defer self.renderer_state.mutex.unlock();
+                            const t: *terminal.Terminal = self.renderer_state.terminal;
+                            t.carriageReturn();
+                            t.linefeed() catch {};
+                            t.printString("Usage: @ghostty send <session-id> <command>") catch {};
+                            t.linefeed() catch {};
+                        } else {
+                            const rest_start = 5 + target_session.?.len + 1;
+                            if (rest_start < subcmd.len) {
+                                const cmd_to_send = subcmd[rest_start..];
+                                
+                                self.renderer_state.mutex.lock();
+                                defer self.renderer_state.mutex.unlock();
+                                const t: *terminal.Terminal = self.renderer_state.terminal;
+                                t.carriageReturn();
+                                t.linefeed() catch {};
+                                t.printString("Would send to ") catch {};
+                                t.printString(target_session.?) catch {};
+                                t.printString(": ") catch {};
+                                t.printString(cmd_to_send) catch {};
+                                t.linefeed() catch {};
+                            }
+                        }
+                    } else if (std.mem.eql(u8, subcmd, "session")) {
+                        // Legacy @ghostty session command
+                        var buf_id: [64]u8 = undefined;
+                        const session_id = try std.fmt.bufPrint(&buf_id, "surface-{x}", .{@intFromPtr(self)});
+                        
+                        self.renderer_state.mutex.lock();
+                        defer self.renderer_state.mutex.unlock();
+                        const t: *terminal.Terminal = self.renderer_state.terminal;
+                        t.carriageReturn();
+                        t.linefeed() catch {};
+                        t.printString("Session ID: ") catch {};
+                        t.printString(session_id) catch {};
+                        t.linefeed() catch {};
+                    } else {
+                        // Unknown subcommand
+                        self.renderer_state.mutex.lock();
+                        defer self.renderer_state.mutex.unlock();
+                        const t: *terminal.Terminal = self.renderer_state.terminal;
+                        t.carriageReturn();
+                        t.linefeed() catch {};
+                        t.printString("Unknown command. Try: @ghostty send <session> <text>") catch {};
+                        t.linefeed() catch {};
+                    }
+                } else {
+                    // Input starts with @ but not ghostty - treat as mistype, replay to PTY
+                    const out = try self.alloc.dupe(u8, buf);
+                    defer self.alloc.free(out);
+                    self.io.queueMessage(try termio.Message.writeReq(self.alloc, out), .unlocked);
                 }
-                
+
+                self.exitCapture();
                 return .consumed;
             }
-            
-            // Unknown @command - clear it
-            self.command_buffer.clearRetainingCapacity();
-            var response_buf: [256]u8 = undefined;
-            const clear_len = command.len;
-            var spaces: [256]u8 = undefined;
-            @memset(spaces[0..clear_len], ' ');
-            const response = try std.fmt.bufPrint(&response_buf, "\r{s}\r\n", .{spaces[0..clear_len]});
-            const msg = try termio.Message.writeReq(self.alloc, response);
-            self.io.queueMessage(msg, .unlocked);
-            
-            return .consumed;
-        }
-        
-        // Handle character collection for @commands
-        if (event.utf8.len > 0) {
-            // Check if this might be the start of a command
-            if (self.command_buffer.items.len == 0 and event.utf8[0] == '@') {
-                // Start collecting command
+
+            // Backspace/Delete
+            if (event.key == .backspace or event.key == .delete) {
+                if (self.command_buffer.items.len > 0) {
+                    _ = self.command_buffer.pop();
+                    if (self.command_buffer.items.len == 0) {
+                        // All deleted, exit capture
+                        self.exitCapture();
+                    } else {
+                        self.overlayShow();
+                    }
+                }
+                return .consumed;
+            }
+
+            // Escape: cancel
+            if (event.key == .escape) {
+                self.exitCapture();
+                return .consumed;
+            }
+
+            // Normal printable characters
+            if (event.utf8.len > 0) {
                 try self.command_buffer.appendSlice(event.utf8);
-                
-                // Echo the character to screen so user can see what they're typing
-                const echo_msg = try termio.Message.writeReq(self.alloc, event.utf8);
-                self.io.queueMessage(echo_msg, .unlocked);
-                
-                return .consumed; // Don't send @ to terminal via encodeKey
-            } else if (building_command) {
-                // Continue collecting command
-                try self.command_buffer.appendSlice(event.utf8);
-                
-                // Echo the character to screen so user can see what they're typing
-                const echo_msg = try termio.Message.writeReq(self.alloc, event.utf8);
-                self.io.queueMessage(echo_msg, .unlocked);
-                
-                return .consumed; // Don't send characters to terminal via encodeKey
+
+                // Prefix validation: if no longer a prefix of "@ghostty", replay and exit
+                if (self.command_buffer.items.len <= CMD_PREFIX.len) {
+                    const s = self.command_buffer.items;
+                    if (!std.mem.startsWith(u8, CMD_PREFIX, s)) {
+                        const out = try self.alloc.dupe(u8, s);
+                        defer self.alloc.free(out);
+                        self.exitCapture(); // Clear overlay + restore KAM
+                        // Send previously captured chars to PTY (equivalent to normal input)
+                        self.io.queueMessage(try termio.Message.writeReq(self.alloc, out), .unlocked);
+                        return .consumed;
+                    }
+                }
+
+                self.overlayShow();
+                return .consumed;
             }
-        }
-        
-        // Handle backspace for @commands
-        if (building_command and (event.key == .backspace or event.key == .delete)) {
-            if (self.command_buffer.items.len > 0) {
-                _ = self.command_buffer.pop();
-                
-                // Send backspace sequence to terminal to update display
-                const backspace_seq = "\x08 \x08"; // Move back, space, move back
-                const echo_msg = try termio.Message.writeReq(self.alloc, backspace_seq);
-                self.io.queueMessage(echo_msg, .unlocked);
-            }
-            return .consumed; // Don't send backspace to terminal via encodeKey
-        }
-        
-        // Clear buffer on escape
-        if (building_command and event.key == .escape) {
-            // Clear the displayed command
-            const clear_len = self.command_buffer.items.len;
-            if (clear_len > 0) {
-                var spaces: [256]u8 = undefined;
-                @memset(spaces[0..@min(clear_len, 256)], ' ');
-                var response_buf: [256]u8 = undefined;
-                const response = try std.fmt.bufPrint(&response_buf, "\r{s}\r", .{spaces[0..@min(clear_len, 256)]});
-                const msg = try termio.Message.writeReq(self.alloc, response);
-                self.io.queueMessage(msg, .unlocked);
-            }
-            self.command_buffer.clearRetainingCapacity();
+
+            // Other keys (arrows, etc.) - just consume for now
             return .consumed;
         }
     }
@@ -2412,16 +2451,6 @@ pub fn keyCallback(
         if (self.child_exited) {
             self.close();
             return .closed;
-        }
-
-        // At this point, we've already handled @commands above, so just clear
-        // any stale buffer if we're not building a command
-        if (event.action == .press) {
-            const building_command = self.command_buffer.items.len > 0 and 
-                                    self.command_buffer.items[0] == '@';
-            if (!building_command and self.command_buffer.items.len > 0) {
-                self.command_buffer.clearRetainingCapacity();
-            }
         }
 
         errdefer write_req.deinit();
