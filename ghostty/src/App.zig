@@ -184,17 +184,20 @@ pub fn addSurface(
 ) Allocator.Error!void {
     try self.surfaces.append(self.alloc, rt_surface);
 
-    // Generate a unique session ID based on Surface pointer
-    var session_id_buf: [32]u8 = undefined;
-    const session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(rt_surface.core())}) catch "surface-unknown";
-    
-    // Set the session_id in the Surface itself
-    @memcpy(&rt_surface.core().session_id, session_id_buf[0..32]);
-    
-    // Register surface with session manager
-    self.session_manager.registerSession(session_id, rt_surface.core(), false) catch |err| {
+    // Register surface with session manager - let it auto-generate a name initially
+    const session_name = self.session_manager.registerSession(null, rt_surface.core(), false) catch |err| blk: {
         log.warn("Failed to register surface with SessionManager: {any}", .{err});
+        // Fallback to a simple ID
+        var buf: [32]u8 = undefined;
+        const fallback = std.fmt.bufPrint(&buf, "s{x}", .{@intFromPtr(rt_surface.core()) & 0xFFFF}) catch "unknown";
+        break :blk fallback;
     };
+    
+    // Store the session name in the surface for reference
+    @memset(&rt_surface.core().session_id, 0);
+    if (session_name.len <= 32) {
+        @memcpy(rt_surface.core().session_id[0..session_name.len], session_name);
+    }
 
     // Since we have non-zero surfaces, we can cancel the quit timer.
     // It is up to the apprt if there is a quit timer at all and if it
@@ -211,10 +214,10 @@ pub fn addSurface(
 /// Delete the surface from the known surface list. This will NOT call the
 /// destructor or free the memory.
 pub fn deleteSurface(self: *App, rt_surface: *apprt.Surface) void {
-    // Unregister from session manager
-    var session_id_buf: [32]u8 = undefined;
-    const session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(rt_surface.core())}) catch "surface-unknown";
-    self.session_manager.unregisterSession(session_id);
+    // Unregister from session manager using stored name or pointer
+    if (self.session_manager.getSessionByPointer(rt_surface.core())) |session_name| {
+        self.session_manager.unregisterSession(session_name);
+    }
 
     // If this surface is the focused surface then we need to clear it.
     // There was a bug where we relied on hasSurface to return false and
@@ -276,7 +279,22 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
             .redraw_surface => |surface| try self.redrawSurface(rt_app, surface),
             .redraw_inspector => |surface| self.redrawInspector(rt_app, surface),
-            .send_to_session => |msg| try self.sendToSession(msg),
+            .send_to_session => |msg| {
+                self.sendToSession(msg.from_surface, msg.target, msg.message) catch |err| {
+                    log.warn("Failed to send to session: {}", .{err});
+                };
+            },
+            .register_session => |msg| {
+                self.registerSessionWithName(msg.surface, msg.name) catch |err| {
+                    log.warn("Failed to register session: {}", .{err});
+                };
+            },
+            .get_session => |msg| {
+                if (self.getSessionName(msg.surface)) |name| {
+                    // Send the name back to the surface for display
+                    msg.surface.displaySessionName(name);
+                }
+            },
 
             // If we're quitting, then we set the quit flag and stop
             // draining the mailbox immediately. This lets us defer
@@ -321,35 +339,34 @@ fn redrawInspector(self: *App, rt_app: *apprt.App, surface: *apprt.Surface) void
 }
 
 /// Send a command to another terminal session
-fn sendToSession(self: *App, msg: anytype) !void {
-    // Find the target surface by matching session_id
-    var target_surface: ?*Surface = null;
-    for (self.surfaces.items) |rt_surface| {
-        const surface = rt_surface.core();
-        
-        // Build session ID for comparison
-        var session_id_buf: [32]u8 = undefined;
-        const surface_session_id = std.fmt.bufPrint(&session_id_buf, "surface-{x}", .{@intFromPtr(surface)}) catch continue;
-        
-        if (std.mem.eql(u8, surface_session_id, msg.session_id)) {
-            target_surface = surface;
-            break;
-        }
-    }
+pub fn sendToSession(self: *App, from: *Surface, target_name: []const u8, message: []const u8) !void {
+    // Get sender's session name
+    const from_name = self.session_manager.getSessionByPointer(from) orelse "unknown";
     
-    if (target_surface == null) {
-        log.warn("Target session not found: {s}", .{msg.session_id});
-        return;
-    }
+    // Send via SessionManager which will handle routing
+    try self.session_manager.sendToSession(from_name, target_name, message, false);
+}
 
-    // Send the command to the target terminal's PTY via its termio queue
-    const target = target_surface.?;
-    target.io.queueMessage(try termio.Message.writeReq(
-        self.alloc,
-        msg.command,
-    ), .unlocked);
+/// Register a surface with a custom session name
+pub fn registerSessionWithName(self: *App, surface: *Surface, name: []const u8) !void {
+    // First unregister if already registered
+    if (self.session_manager.getSessionByPointer(surface)) |old_name| {
+        self.session_manager.unregisterSession(old_name);
+    }
     
-    log.info("Sent command to session {s}: {s}", .{ msg.session_id, msg.command });
+    // Register with new name
+    const actual_name = try self.session_manager.registerSession(name, surface, false);
+    
+    // Update surface's session_id field
+    @memset(&surface.session_id, 0);
+    if (actual_name.len <= 32) {
+        @memcpy(surface.session_id[0..actual_name.len], actual_name);
+    }
+}
+
+/// Get the current session name for a surface
+pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
+    return self.session_manager.getSessionByPointer(surface);
 }
 
 /// Create a new window
@@ -610,10 +627,20 @@ pub const Message = union(enum) {
 
     /// Send a command to another terminal session
     send_to_session: struct {
-        from_surface: ?*Surface,
-        session_id: []const u8,
-        command: []const u8,
-        wait_response: bool = false,
+        from_surface: *Surface,
+        target: []const u8,  // Target session name
+        message: []const u8,
+    },
+    
+    /// Register a session with a custom name
+    register_session: struct {
+        surface: *Surface,
+        name: []const u8,
+    },
+    
+    /// Get current session name for a surface
+    get_session: struct {
+        surface: *Surface,
     },
 
     const NewWindow = struct {

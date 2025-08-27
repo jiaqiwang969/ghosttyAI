@@ -8,13 +8,15 @@ pub const SessionManager = @This();
 const SessionId = []const u8;
 const SessionMap = std.StringHashMap(*SessionInfo);
 const LinkList = std.ArrayList(SessionLink);
+const PointerMap = std.AutoHashMap(usize, []const u8);  // Map surface pointer to session name
 
 /// 会话信息
 const SessionInfo = struct {
-    id: SessionId,
+    id: SessionId,  // User-friendly name like "main", "dev", etc.
     surface_ptr: *anyopaque,  // 实际是 *Surface，这里用anyopaque避免循环依赖
     created_time: i64,
     is_remote: bool = false,
+    auto_generated: bool = false,  // Whether this name was auto-generated
     
     // 会话统计
     messages_sent: u64 = 0,
@@ -44,17 +46,21 @@ pub const Message = struct {
 // SessionManager 字段
 allocator: Allocator,
 sessions: SessionMap,
+pointer_map: PointerMap,  // Quick lookup by pointer
 links: LinkList,
 message_queue: std.ArrayList(Message),
 mutex: std.Thread.Mutex,
+next_auto_id: u32,  // For auto-generated names
 
 pub fn init(allocator: Allocator) SessionManager {
     return .{
         .allocator = allocator,
         .sessions = SessionMap.init(allocator),
+        .pointer_map = PointerMap.init(allocator),
         .links = LinkList.init(allocator),
         .message_queue = std.ArrayList(Message).init(allocator),
         .mutex = std.Thread.Mutex{},
+        .next_auto_id = 0,
     };
 }
 
@@ -66,6 +72,7 @@ pub fn deinit(self: *SessionManager) void {
         self.allocator.destroy(entry.value_ptr.*);
     }
     self.sessions.deinit();
+    self.pointer_map.deinit();
     
     // 清理链接
     for (self.links.items) |link| {
@@ -83,35 +90,59 @@ pub fn deinit(self: *SessionManager) void {
     self.message_queue.deinit();
 }
 
-/// 注册新会话
+/// 注册新会话 (支持用户自定义名称)
 pub fn registerSession(
     self: *SessionManager,
-    id: []const u8,
+    id_optional: ?[]const u8,  // null means auto-generate
     surface_ptr: *anyopaque,
     is_remote: bool,
-) !void {
+) ![]const u8 {  // Returns the actual session ID used
     self.mutex.lock();
     defer self.mutex.unlock();
     
-    // 复制会话ID
-    const id_copy = try self.allocator.dupe(u8, id);
-    errdefer self.allocator.free(id_copy);
+    // Generate or use provided ID
+    const id = if (id_optional) |user_id| blk: {
+        // Check if name already exists
+        if (self.sessions.contains(user_id)) {
+            return error.SessionNameExists;
+        }
+        break :blk try self.allocator.dupe(u8, user_id);
+    } else blk: {
+        // Auto-generate a simple name
+        var buf: [16]u8 = undefined;
+        const auto_id = try std.fmt.bufPrint(&buf, "s{d}", .{self.next_auto_id});
+        self.next_auto_id += 1;
+        break :blk try self.allocator.dupe(u8, auto_id);
+    };
+    errdefer self.allocator.free(id);
     
     // 创建会话信息
     const info = try self.allocator.create(SessionInfo);
     info.* = .{
-        .id = id_copy,
+        .id = id,
         .surface_ptr = surface_ptr,
         .created_time = std.time.milliTimestamp(),
         .is_remote = is_remote,
+        .auto_generated = (id_optional == null),
     };
     
-    try self.sessions.put(id_copy, info);
+    try self.sessions.put(id, info);
+    try self.pointer_map.put(@intFromPtr(surface_ptr), id);
     
     std.log.info("Registered session: {s} (remote: {any})", .{ 
         id, 
         is_remote 
     });
+    
+    return id;
+}
+
+/// Get session name by surface pointer
+pub fn getSessionByPointer(self: *SessionManager, surface_ptr: *anyopaque) ?[]const u8 {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    
+    return self.pointer_map.get(@intFromPtr(surface_ptr));
 }
 
 /// 注销会话
@@ -120,6 +151,9 @@ pub fn unregisterSession(self: *SessionManager, id: []const u8) void {
     defer self.mutex.unlock();
     
     if (self.sessions.fetchRemove(id)) |entry| {
+        // Remove from pointer map
+        _ = self.pointer_map.remove(@intFromPtr(entry.value.surface_ptr));
+        
         // 删除相关的链接
         var i: usize = 0;
         while (i < self.links.items.len) {
@@ -311,17 +345,26 @@ fn isSessionLinked(self: *SessionManager, id: []const u8) bool {
     return false;
 }
 
-/// 实际投递消息（在真实实现中会调用Surface方法）
+/// 实际投递消息（调用Surface方法）
 fn deliverMessage(self: *SessionManager, msg: Message) !void {
-    _ = self;
+    // Get target session info  
+    const target_info = self.sessions.get(msg.to) orelse {
+        return error.SessionNotFound;
+    };
     
-    // 这里是实际发送消息的地方
-    // 在完整实现中，这会：
-    // 1. 获取目标会话的 Surface 指针
-    // 2. 调用 surface.io.backend.write(msg.data)
-    // 3. 如果是远程会话，通过 OSC 序列发送
+    // Import Surface type to call its methods
+    const Surface = @import("../Surface.zig");
+    const surface = @as(*Surface, @ptrCast(@alignCast(target_info.surface_ptr)));
     
-    std.log.debug("Delivering message to {s}: {s}", .{
+    // Import termio for creating proper message format
+    const termio = @import("../termio.zig");
+    
+    // Write message to target surface's PTY
+    // This writes directly to the terminal backend
+    const write_msg = try termio.Message.writeReq(self.allocator, msg.data);
+    surface.io.queueMessage(write_msg, .unlocked);
+    
+    std.log.debug("Message delivered to {s}: {s}", .{
         msg.to,
         msg.data,
     });
@@ -339,18 +382,22 @@ test "SessionManager basic operations" {
     var surface_a: u32 = 1;
     var surface_b: u32 = 2;
     
-    // 注册两个会话
-    try manager.registerSession("terminal-a", &surface_a, false);
-    try manager.registerSession("terminal-b", &surface_b, false);
+    // 注册两个会话 with custom names
+    const id_a = try manager.registerSession("main", &surface_a, false);
+    const id_b = try manager.registerSession("dev", &surface_b, false);
+    
+    // Auto-generated name
+    const id_c = try manager.registerSession(null, &surface_a, false);
+    _ = id_c;
     
     // 发送消息
-    try manager.sendToSession("terminal-a", "terminal-b", "Hello from A", false);
+    try manager.sendToSession(id_a, id_b, "Hello from main", false);
     
     // 建立双向链接
-    try manager.linkSessions("terminal-a", "terminal-b", true);
+    try manager.linkSessions(id_a, id_b, true);
     
     // 路由输出
-    try manager.routeOutput("terminal-a", "ls -la");
+    try manager.routeOutput(id_a, "ls -la");
     
     // 列出会话
     const stdout = std.io.getStdOut().writer();

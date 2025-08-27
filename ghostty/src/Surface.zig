@@ -2345,33 +2345,64 @@ pub fn keyCallback(
                         } else {
                             const rest_start = 5 + target_session.?.len + 1;
                             if (rest_start < subcmd.len) {
-                                const cmd_to_send = subcmd[rest_start..];
+                                var cmd_to_send = subcmd[rest_start..];
+                                
+                                // Strip quotes from the command if present
+                                if (cmd_to_send.len >= 2) {
+                                    // Check for surrounding double quotes
+                                    if (cmd_to_send[0] == '"' and cmd_to_send[cmd_to_send.len - 1] == '"') {
+                                        cmd_to_send = cmd_to_send[1 .. cmd_to_send.len - 1];
+                                    }
+                                    // Check for surrounding single quotes
+                                    else if (cmd_to_send[0] == '\'' and cmd_to_send[cmd_to_send.len - 1] == '\'') {
+                                        cmd_to_send = cmd_to_send[1 .. cmd_to_send.len - 1];
+                                    }
+                                }
+                                
+                                // Actually send the message via App/SessionManager
+                                _ = self.app.mailbox.push(.{ .send_to_session = .{
+                                    .from_surface = self,
+                                    .target = try self.alloc.dupe(u8, target_session.?),
+                                    .message = try self.alloc.dupe(u8, cmd_to_send),
+                                } }, .{ .ns = 100_000_000 });
                                 
                                 self.renderer_state.mutex.lock();
                                 defer self.renderer_state.mutex.unlock();
                                 const t: *terminal.Terminal = self.renderer_state.terminal;
                                 t.carriageReturn();
                                 t.linefeed() catch {};
-                                t.printString("Would send to ") catch {};
+                                t.printString("Sent to ") catch {};
                                 t.printString(target_session.?) catch {};
                                 t.printString(": ") catch {};
                                 t.printString(cmd_to_send) catch {};
                                 t.linefeed() catch {};
                             }
                         }
-                    } else if (std.mem.eql(u8, subcmd, "session")) {
-                        // Legacy @ghostty session command
-                        var buf_id: [64]u8 = undefined;
-                        const session_id = try std.fmt.bufPrint(&buf_id, "surface-{x}", .{@intFromPtr(self)});
+                    } else if (std.mem.startsWith(u8, subcmd, "session")) {
+                        // @ghostty session [name] - register or get session
+                        const args = std.mem.trim(u8, subcmd[7..], " ");
                         
-                        self.renderer_state.mutex.lock();
-                        defer self.renderer_state.mutex.unlock();
-                        const t: *terminal.Terminal = self.renderer_state.terminal;
-                        t.carriageReturn();
-                        t.linefeed() catch {};
-                        t.printString("Session ID: ") catch {};
-                        t.printString(session_id) catch {};
-                        t.linefeed() catch {};
+                        if (args.len > 0) {
+                            // Register with custom name
+                            _ = self.app.mailbox.push(.{ .register_session = .{
+                                .surface = self,
+                                .name = try self.alloc.dupe(u8, args),
+                            } }, .{ .ns = 100_000_000 });
+                            
+                            self.renderer_state.mutex.lock();
+                            defer self.renderer_state.mutex.unlock();
+                            const t: *terminal.Terminal = self.renderer_state.terminal;
+                            t.carriageReturn();
+                            t.linefeed() catch {};
+                            t.printString("Session registered as: ") catch {};
+                            t.printString(args) catch {};
+                            t.linefeed() catch {};
+                        } else {
+                            // Get current session name
+                            _ = self.app.mailbox.push(.{ .get_session = .{
+                                .surface = self,
+                            } }, .{ .ns = 100_000_000 });
+                        }
                     } else {
                         // Unknown subcommand
                         self.renderer_state.mutex.lock();
@@ -5352,7 +5383,19 @@ fn completeClipboardPaste(
         };
         
         const session_id = after_send[0..session_end];
-        const command = std.mem.trim(u8, after_send[session_end + 1..], " \r\n");
+        var command = std.mem.trim(u8, after_send[session_end + 1..], " \r\n");
+        
+        // Strip quotes from the command if present
+        if (command.len >= 2) {
+            // Check for surrounding double quotes
+            if (command[0] == '"' and command[command.len - 1] == '"') {
+                command = command[1 .. command.len - 1];
+            }
+            // Check for surrounding single quotes  
+            else if (command[0] == '\'' and command[command.len - 1] == '\'') {
+                command = command[1 .. command.len - 1];
+            }
+        }
         
         if (command.len == 0) {
             log.warn("@send command has empty command text", .{});
@@ -5367,9 +5410,8 @@ fn completeClipboardPaste(
         _ = self.app.mailbox.push(.{
             .send_to_session = .{
                 .from_surface = self,
-                .session_id = session_copy,
-                .command = cmd_copy,
-                .wait_response = false,
+                .target = session_copy,
+                .message = cmd_copy,
             },
         }, .{ .ns = 100_000_000 });
         
@@ -6025,4 +6067,20 @@ test "Surface: rectangle selection logic" {
         9, 2, // expected end
         true, //rectangle selection
     );
+}
+
+
+/// Display the current session name for this surface
+pub fn displaySessionName(self: *Surface, name: []const u8) void {
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+    const t: *terminal.Terminal = self.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("Session: ") catch {};
+    t.printString(name) catch {};
+    t.linefeed() catch {};
+    
+    // Queue a render to show the message
+    self.queueRender() catch {};
 }
