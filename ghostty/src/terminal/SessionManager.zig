@@ -356,72 +356,9 @@ fn deliverMessage(self: *SessionManager, msg: Message) !void {
     const Surface = @import("../Surface.zig");
     const surface = @as(*Surface, @ptrCast(@alignCast(target_info.surface_ptr)));
     
-    // Import termio for creating proper message format
-    const termio = @import("../termio.zig");
-    
-    // Check if the message is a @ghostty command
-    const CMD_PREFIX = "@ghostty";
-    if (std.mem.startsWith(u8, msg.data, CMD_PREFIX)) {
-        // This is a @ghostty command - inject it as if it was typed
-        // We need to trigger the command capture mechanism
-        
-        // First, show that we received the command
-        const terminal_ptr = @import("../terminal/main.zig");
-        
-        // Lock the terminal and display a message
-        surface.renderer_state.mutex.lock();
-        defer surface.renderer_state.mutex.unlock();
-        const t: *terminal_ptr.Terminal = surface.renderer_state.terminal;
-        
-        // Show received command notification
-        t.carriageReturn();
-        t.linefeed() catch {};
-        t.printString("Received from ") catch {};
-        t.printString(msg.from) catch {};
-        t.printString(": ") catch {};
-        t.linefeed() catch {};
-        
-        // Now inject the command into the command buffer as if typed
-        // This simulates the user typing the command
-        surface.command_buffer.clearRetainingCapacity();
-        surface.command_buffer.appendSlice(msg.data) catch {};
-        
-        // Process the command directly (similar to what happens on Enter key)
-        const line = std.mem.trim(u8, msg.data, " \r\n");
-        
-        if (std.mem.startsWith(u8, line, CMD_PREFIX ++ " ")) {
-            // Extract and process the subcommand
-            const subcmd = line[CMD_PREFIX.len + 1..];
-            
-            // Process different subcommands
-            if (std.mem.startsWith(u8, subcmd, "send ")) {
-                // Nested send command - be careful to avoid infinite loops!
-                // For now, just display it
-                t.printString("  (nested @ghostty send - displaying only)") catch {};
-                t.linefeed() catch {};
-                t.printString("  Command: ") catch {};
-                t.printString(subcmd) catch {};
-                t.linefeed() catch {};
-            } else if (std.mem.startsWith(u8, subcmd, "session")) {
-                // Session command - process it
-                t.printString("  Processing session command...") catch {};
-                t.linefeed() catch {};
-                // Could trigger actual session registration here
-            } else {
-                // Other commands
-                t.printString("  Command: ") catch {};
-                t.printString(subcmd) catch {};
-                t.linefeed() catch {};
-            }
-        }
-        
-        // Clear command buffer after processing
-        surface.command_buffer.clearRetainingCapacity();
-    } else {
-        // Regular message - write to PTY as before
-        const write_msg = try termio.Message.writeReq(self.allocator, msg.data);
-        surface.io.queueMessage(write_msg, .unlocked);
-    }
+    // Use the new public method to process the message
+    // This simulates keyboard input, ensuring @ghostty commands are properly detected
+    try surface.processReceivedMessage(msg.from, msg.data);
     
     std.log.debug("Message delivered to {s}: {s}", .{
         msg.to,

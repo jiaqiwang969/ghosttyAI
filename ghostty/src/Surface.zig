@@ -779,6 +779,62 @@ fn exitCapture(self: *Surface) void {
     self.overlayClear();
 }
 
+/// Process a message received from another session
+/// This simulates keyboard input to ensure @ghostty commands are properly handled
+pub fn processReceivedMessage(self: *Surface, from: []const u8, message: []const u8) !void {
+    // Import the KeyEvent type directly
+    const KeyEvent = @import("input/key.zig").KeyEvent;
+    
+    // Show who sent the message
+    self.renderer_state.mutex.lock();
+    const t: *terminal.Terminal = self.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("[From ") catch {};
+    t.printString(from) catch {};
+    t.printString("] ") catch {};
+    self.renderer_state.mutex.unlock();
+    
+    // Simulate keyboard input for each character
+    // This ensures @ghostty commands are properly detected and processed
+    for (message) |char| {
+        // Create a key event for this character
+        var utf8_buf: [1]u8 = .{char};
+        const key_event = KeyEvent{
+            .action = .press,
+            .key = switch (char) {
+                '\n', '\r' => .enter,
+                '\x1b' => .escape,
+                '\x08', '\x7f' => .backspace,
+                else => .unidentified,
+            },
+            .mods = .{},
+            .utf8 = utf8_buf[0..1],
+        };
+        
+        // Process through keyCallback to trigger @ detection and command processing
+        _ = self.keyCallback(key_event) catch |err| {
+            log.warn("Failed to process key event for char {}: {}", .{ char, err });
+            // If key processing fails, write directly to PTY as fallback
+            self.io.queueMessage(try termio.Message.writeReq(self.alloc, utf8_buf[0..1]), .unlocked);
+        };
+    }
+    
+    // If message doesn't end with newline but is a complete command, add Enter
+    if (message.len > 0 and message[message.len - 1] != '\n') {
+        if (std.mem.startsWith(u8, message, CMD_PREFIX)) {
+            // This looks like a @ghostty command without Enter, add it
+            const enter_event = KeyEvent{
+                .action = .press,
+                .key = .enter,
+                .mods = .{},
+                .utf8 = "\n",
+            };
+            _ = self.keyCallback(enter_event) catch {};
+        }
+    }
+}
+
 /// Close this surface. This will trigger the runtime to start the
 /// close process, which should ultimately deinitialize this surface.
 pub fn close(self: *Surface) void {
