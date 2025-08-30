@@ -1,0 +1,116 @@
+@startuml tmux-attach-flow
+!theme cerulean
+title tmux attach流程详解 - 真正的会话切换
+
+participant "Client 1" as C1
+participant "tmux Server" as Server
+participant "Session A" as SA
+participant "Session B" as SB
+participant "WindowPane A" as WPA
+participant "WindowPane B" as WPB
+participant "PTY A" as PTYA
+participant "PTY B" as PTYB
+
+== 初始状态: Client 1 attached to Session A ==
+
+C1 -> Server: 当前连接
+Server -> SA: client.session = Session A
+SA -> WPA: 当前窗口
+WPA -> PTYA: 运行shell进程
+note over C1: Client 1 看到Session A的内容
+
+== Session B在后台持续运行 ==
+
+SB -> WPB: Session B的窗口
+WPB -> PTYB: shell进程持续运行
+note over SB: Session B即使无Client连接\n仍然保持状态和进程
+
+== Client 1 执行: tmux attach session-b ==
+
+C1 -> Server: attach session-b
+activate Server
+
+group 步骤1: 查找目标Session
+    Server -> Server: session_find("session-b")
+    Server -> SB: 找到Session B
+end
+
+group 步骤2: 设置Client会话 [关键!]
+    Server -> C1: server_client_set_session(client, session_b)
+    activate C1
+    C1 -> C1: old_session = client.session (保存Session A)
+    C1 -> C1: client.session = session_b (切换到Session B)
+    C1 -> C1: client.last_session = old_session
+    deactivate C1
+end
+
+group 步骤3: 更新焦点和活动时间
+    Server -> SA: window_update_focus(session_a.curw.window)
+    note right: 通知Session A失去焦点
+    Server -> SB: window_update_focus(session_b.curw.window)  
+    note right: 通知Session B获得焦点
+    Server -> SB: session_update_activity(session_b)
+    Server -> SB: gettimeofday(&session_b.last_attached_time)
+end
+
+group 步骤4: 立即重绘 [神奇之处!]
+    Server -> Server: recalculate_sizes()
+    note right: 重新计算所有尺寸
+    Server -> C1: tty_redraw_region() 
+    note right: TTY重绘整个区域
+    C1 -> SB: 读取Session B的Screen内容
+    SB -> WPB: 获取当前WindowPane
+    WPB -> WPB: screen内容 (完整保存)
+    C1 -> C1: 立即显示Session B的内容
+end
+
+deactivate Server
+
+note over C1: Client 1 现在看到Session B的内容\n包括完整的历史和当前状态
+
+== 关键洞察 ==
+
+note left of Server
+**tmux的架构精髓：**
+
+1. **真正的所有权分离**
+   - Session拥有所有内容状态
+   - Client只是"查看器"
+   - PTY属于Session，不属于Client
+
+2. **完整的状态持久化**
+   - Screen内容保存在Session中
+   - 历史记录保存在Session中
+   - 光标位置保存在Session中
+   - Shell进程属于Session
+
+3. **简单的切换机制**
+   - attach只需更新client.session指针
+   - 内容早就存在，无需"传输"
+   - TTY重绘就能显示新内容
+
+4. **无缝的用户体验**
+   - attach瞬间完成
+   - 所有状态完整恢复
+   - 就像从未离开过
+end note
+
+note right of C1
+**为什么tmux的attach如此简单？**
+
+因为Session真正拥有一切：
+- Terminal内容 ✅
+- Shell进程 ✅  
+- PTY文件描述符 ✅
+- 历史记录 ✅
+- 光标状态 ✅
+
+Client只需要：
+1. 更新session指针
+2. 重绘TTY
+3. 完成！
+
+这就是真正的"会话持久化"
+end note
+
+@enduml

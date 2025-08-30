@@ -1,0 +1,46 @@
+@startuml current-dataflow
+!theme cerulean
+title 当前架构 - 数据流
+
+actor User
+participant "Surface A" as SA
+participant "Termio A" as TA
+participant "Terminal A" as TermA
+participant "PTY A" as PA
+participant "Shell A" as ShA
+
+actor "User B" as User2
+participant "Surface B" as SB
+participant "Termio B" as TB
+participant "Terminal B" as TermB
+participant "PTY B" as PB
+participant "Shell B" as ShB
+
+== Terminal A 输入输出 ==
+User -> SA: 键盘输入
+SA -> TA: write(input)
+TA -> PA: write(bytes)
+PA -> ShA: stdin
+ShA -> PA: stdout
+PA -> TA: read()
+TA -> TermA: write(output)
+TermA -> SA: dirty notification
+SA -> User: 渲染显示
+
+== Terminal B 独立运行 ==
+User2 -> SB: 键盘输入
+SB -> TB: write(input)
+TB -> PB: write(bytes)
+PB -> ShB: stdin
+ShB -> PB: stdout
+PB -> TB: read()
+TB -> TermB: write(output)
+TermB -> SB: dirty notification
+SB -> User2: 渲染显示
+
+note over TermA, TermB
+  两个Terminal完全独立
+  无法共享内容
+end note
+
+@enduml

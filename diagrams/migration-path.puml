@@ -1,0 +1,114 @@
+@startuml migration-path
+!theme cerulean
+title SessionCore架构迁移路径 - Phase 1-3已实现，Phase 4待开发
+
+state "第3次失败" as Failed #Pink {
+    state "激进架构改革" as F1
+    state "破坏现有功能" as F2
+    state "无法修复" as F3
+    state "Git Revert回退" as F4
+    F1 --> F2
+    F2 --> F3
+    F3 --> F4
+}
+
+state "当前状态" as Current {
+    state "Surface拥有Terminal" as S1
+    state "SessionManager管理指针" as S2
+    state "每个Surface独立PTY" as S3
+}
+
+state "Phase 1: 共享Terminal (✅完成)" as Phase1 #LightGreen {
+    state "创建SessionCore结构 ✅" as P1_1
+    state "Terminal仍由Surface创建 ✅" as P1_2
+    state "SessionCore持有Terminal引用 ✅" as P1_3
+    state "多Surface共享Terminal指针 ✅" as P1_4
+    state "12个测试全部通过 ✅" as P1_5
+    P1_1 --> P1_2
+    P1_2 --> P1_3
+    P1_3 --> P1_4
+    P1_4 --> P1_5
+}
+
+state "Phase 2: 双模式支持 (⚠️部分完成)" as Phase2 #Yellow {
+    state "Termio支持borrowed模式 ✅" as P2_1
+    state "可初始化借用Terminal ✅" as P2_2  
+    state "❌ Surface无法切换Terminal" as P2_3
+    state "❌ 实际内容不切换" as P2_4
+    P2_1 --> P2_2
+    P2_2 --> P2_3
+    P2_3 --> P2_4
+}
+
+state "Phase 3: 完全迁移 (⚠️定义但未实现)" as Phase3 #Orange {
+    state "SessionCore定义ownership ✅" as P3_1
+    state "attach/detach命令 ✅" as P3_2
+    state "❌ 无Terminal切换" as P3_3
+    state "❌ 无session持久化" as P3_4
+    P3_1 --> P3_2
+    P3_2 --> P3_3
+    P3_3 --> P3_4
+}
+
+state "Phase 4: 架构重构 (学习tmux)" as Phase4 #LightCoral {
+    state "SessionCore拥有Terminal和PTY" as P4_1
+    state "Surface变成纯查看器" as P4_2
+    state "简化attach为指针切换" as P4_3
+    state "渲染器重绘机制" as P4_4
+    state "真正的会话持久化" as P4_5
+    P4_1 --> P4_2
+    P4_2 --> P4_3
+    P4_3 --> P4_4
+    P4_4 --> P4_5
+}
+
+state "目标状态" as Target #LightGreen {
+    state "完整的SessionCore架构" as T1
+    state "真正的attach/detach" as T2
+    state "tmux体验" as T3
+}
+
+Failed --> Current: Git Revert
+Current --> Phase1: 最小改动原则
+Phase1 --> Phase2: 验证可行后
+Phase2 --> Phase3: 稳定后
+Phase3 --> Phase4: 需要实现
+Phase4 --> Target: 完成
+
+note left of Failed
+  第3次尝试失败教训:
+  - 试图一次改变太多
+  - 破坏了@ghostty命令
+  - 破坏了PTY I/O
+  - 连锁故障无法恢复
+end note
+
+note right of Phase1
+  ✅ 2024-12-29完成
+  - 基础结构建立
+  - 引用计数工作
+  - 测试通过
+end note
+
+note right of Phase2  
+  ⚠️ 部分完成
+  - 数据结构✅
+  - 初始化支持✅
+  - 运行时切换❌
+end note
+
+note right of Phase3
+  ⚠️ 仅定义未实现
+  - 命令存在✅
+  - 功能缺失❌
+end note
+
+note right of Phase4
+  🎯 架构重构 (学习tmux)
+  - SessionCore拥有Terminal和PTY
+  - Surface变成查看器
+  - attach简化为指针切换
+  - 真正的会话持久化
+end note
+
+@enduml

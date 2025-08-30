@@ -1,0 +1,102 @@
+@startuml phase4-terminal-switching
+!theme cerulean
+title Phase 4: 真正的Terminal切换机制设计
+
+participant "Surface" as S
+participant "App" as A
+participant "SessionManager" as SM
+participant "SessionCore A" as SCA
+participant "SessionCore B" as SCB
+participant "Termio" as T
+participant "Renderer" as R
+
+== 当前问题: attach命令不切换内容 ==
+
+S -> A: @ghostty attach session-b
+A -> SM: getOrCreateCore("session-b")
+SM -> SCB: attachSurface(surface)
+SCB --> S: session_core = SCB
+note over S: ⚠️ 仅更新了指针\n但Terminal内容未变!
+S -> R: 继续显示原Terminal内容
+
+== Phase 4 解决方案: 完整切换流程 ==
+
+group 步骤1: 保存当前Terminal状态
+    S -> SCA: saveTerminalState()
+    activate SCA
+    SCA -> SCA: terminal_snapshot = Terminal.serialize()
+    note right: 保存:\n- Screen内容\n- Scrollback历史\n- Cursor位置\n- 色彩配置
+    deactivate SCA
+end
+
+group 步骤2: 准备目标SessionCore
+    S -> SCB: prepareForAttachment()
+    activate SCB
+    alt SessionCore B有快照
+        SCB -> SCB: Terminal.deserialize(snapshot)
+        note right: 恢复保存的状态
+    else SessionCore B是新的
+        SCB -> SCB: createOwnedTerminal()
+        note right: 创建新Terminal
+    end
+    SCB --> S: terminal_ptr
+    deactivate SCB
+end
+
+group 步骤3: 重新初始化Termio [关键缺失!]
+    S -> T: switchToBorrowedMode(terminal_ptr)
+    activate T
+    T -> T: 保存当前PTY
+    T -> T: terminal_storage = .borrowed(terminal_ptr)
+    T -> T: 重新连接parser到新Terminal
+    T -> T: 刷新stream handler
+    note right: ❌ 此方法不存在!\n需要实现
+    deactivate T
+end
+
+group 步骤4: 刷新渲染器 [关键缺失!]
+    S -> R: switchTerminal(new_terminal)
+    activate R
+    R -> R: 锁定mutex
+    R -> R: renderer_state.terminal = new_terminal
+    R -> R: 清空渲染缓存
+    R -> R: 标记全屏重绘
+    R -> R: 触发immediate repaint
+    note right: ❌ 渲染器未感知变化!\n需要强制刷新
+    deactivate R
+end
+
+group 步骤5: 验证切换成功
+    S -> S: 验证新内容显示
+    S -> SCB: 确认attachment
+    SCB -> SM: 更新session映射
+end
+
+== 缺失的关键组件 ==
+
+note over T: <b>Termio需要:</b>\n1. switchToBorrowedMode()方法\n2. 运行时重新初始化能力\n3. PTY重连接机制\n4. Parser状态迁移
+
+note over R: <b>Renderer需要:</b>\n1. switchTerminal()方法\n2. 强制刷新机制\n3. 缓存清理\n4. 立即重绘触发
+
+note over SCA,SCB: <b>SessionCore需要:</b>\n1. Terminal序列化/反序列化\n2. 状态快照管理\n3. PTY所有权转移\n4. 内容同步机制
+
+== Phase 4 实现优先级 ==
+
+note left
+<b>P0 - 必须实现:</b>
+1. Termio.switchToBorrowedMode()
+2. Renderer强制刷新
+3. Terminal内容切换验证
+
+<b>P1 - 核心功能:</b>
+1. Terminal状态序列化
+2. SessionCore快照管理
+3. PTY生命周期管理
+
+<b>P2 - 完善体验:</b>
+1. 平滑切换动画
+2. 历史记录合并
+3. 会话持久化到磁盘
+end note
+
+@enduml

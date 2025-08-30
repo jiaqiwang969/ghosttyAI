@@ -1,0 +1,123 @@
+@startuml sessioncore-dataflow
+!theme cerulean
+title SessionCore架构 - 数据流断点分析 (Phase 1-3实现vs预期)
+
+actor "User" as User
+participant "Surface A" as SA #LightGreen
+participant "Termio A" as TA #LightGreen  
+participant "Terminal A" as TermA #LightGreen
+participant "SessionCore A" as SCA #Yellow
+participant "SessionCore B" as SCB #Yellow
+participant "Terminal B" as TermB #Orange
+participant "Surface B" as SB #Red
+
+== 当前实现: attach命令执行流程 ==
+
+User -> SA: @ghostty attach session-b
+SA -> SA: 解析命令
+SA -> SCA: 通过App发送attach消息
+
+group 成功部分 #LightGreen
+    SCA -> SCB: attachSurface(SA)
+    SCB -> SCB: attached_surfaces.append(SA)
+    SCB -> SCB: ref_count++
+    SCB --> SA: session_core = SCB ✅
+    note right: 指针更新成功
+end
+
+group 失败部分 #Pink
+    SA -> TA: ❌ 无切换机制
+    TA -> TermA: ❌ 仍使用原Terminal
+    note over TA,TermA 
+        <b>断点 1:</b>
+        Termio无法切换到
+        SessionCore B的Terminal
+    end note
+    
+    SA -> SA: ❌ 渲染器未更新
+    note over SA
+        <b>断点 2:</b>
+        renderer_state.terminal
+        仍指向Terminal A
+    end note
+    
+    User <-- SA: 显示"attached"消息
+    User <-- TermA: 但内容仍是Terminal A!
+    note left
+        <b>结果:</b>
+        用户看到"已附加"
+        但内容没变化！
+    end note
+end
+
+== 预期行为: 如何应该工作 ==
+
+User -> SA: @ghostty attach session-b
+
+group Phase 4 需要实现的流程 #LightBlue
+    SA -> SCA: detachSurface(SA)
+    SCA -> TermA: saveSnapshot()
+    note right: 保存当前状态
+    
+    SA -> SCB: attachSurfaceWithTerminal(SA)
+    SCB -> TermB: getOrCreate()
+    SCB --> SA: borrowed_terminal_ptr
+    
+    SA -> TA: <b>switchToBorrowed(TermB)</b>
+    activate TA #Red
+    TA -> TA: terminal_storage = .borrowed(TermB)
+    TA -> TA: reconnectParser(TermB)
+    TA -> TA: updateStreamHandler(TermB)
+    deactivate TA
+    note over TA
+        <b>需要实现:</b>
+        switchToBorrowed()方法
+    end note
+    
+    SA -> SA: <b>refreshRenderer(TermB)</b>
+    activate SA #Red
+    SA -> SA: renderer_state.terminal = TermB
+    SA -> SA: renderer.invalidateAll()
+    SA -> SA: renderer.forceRepaint()
+    deactivate SA
+    note over SA
+        <b>需要实现:</b>
+        强制刷新机制
+    end note
+    
+    User <-- TermB: 显示Terminal B内容 ✅
+end
+
+== 数据流断点总结 ==
+
+note over SA,TermA
+<b>断点 1: Termio层</b>
+- 缺少switchToBorrowed()方法
+- 无法运行时更换Terminal
+- Parser无法重新连接
+- StreamHandler卡在旧Terminal
+end note
+
+note over SA
+<b>断点 2: Surface层</b>
+- 没有重新初始化Termio
+- renderer_state未更新
+- 没有触发刷新
+end note
+
+note over SCB,TermB
+<b>断点 3: SessionCore层</b>
+- Terminal状态无法序列化
+- 没有快照机制
+- PTY不由SessionCore管理
+end note
+
+note over User
+<b>用户体验问题:</b>
+1. attach命令显示成功
+2. 但屏幕内容不变
+3. 输入仍发送到原Terminal
+4. 无法看到目标session内容
+end note
+
+@enduml

@@ -1,183 +1,117 @@
-# Ghostty Terminal Communication Project - CLAUDE.md
+# Ghostty Terminal Session 项目
 
-## 🎯 项目使命
-在Ghostty中实现类似tmux的终端间通信能力，允许终端A向终端B发送命令并接收响应，包括SSH远程场景。
+## 🎯 项目目标
+在 Ghostty 终端中实现类似 tmux 的会话管理功能，让用户可以：
+- 在不同终端窗口之间切换会话（attach/detach）
+- 保持会话持久化（关闭窗口不丢失会话）
+- 多个窗口查看同一个会话
 
-## 📖 项目背景
+## 📊 架构参考（必读）
 
-### 前两次失败的教训
-1. **第一次失败**：试图提取tmux为libtmuxcore，创建175个文件，9+个agents，过度组织化
-2. **第二次失败**：构建916KB的libtmuxcore.dylib，导出999个符号，过度工程化
+**⚠️ 重要：实施前必须理解以下架构图**
 
-### 第三次成功的关键
-1. **源码验证架构**：通过阅读实际代码理解tmux和Ghostty的架构
-2. **找准层次对应**：tmux server ↔ Ghostty App层的准确映射
-3. **最小化实现**：聚焦核心需求 - 终端间发送命令
+关键架构图位于 `/Users/jqwang/98-ghosttyAI/diagrams/`：
 
-## 🏗️ 核心架构理解
+| 文件名 | 说明 | 重要性 |
+|--------|------|--------|
+| `tmux-attach-architecture.puml` | tmux 的 Session-Client 分离架构，理解正确的设计模式 | ⭐⭐⭐ |
+| `ghostty-tmux-gap-analysis.puml` | 分析当前架构为何 attach 失效，理解问题根源 | ⭐⭐⭐ |
+| `new-sessioncore-architecture.puml` | 目标架构设计，明确要实现的结构 | ⭐⭐⭐ |
+| `implementation-roadmap.puml` | Phase 4 实施步骤，按步骤执行 | ⭐⭐⭐ |
 
-### tmux架构（已验证）
-```
-tmux client → tmux server → session → window → pane → PTY
-                  ↑
-            核心路由层
-    (bufferevent_write直接写入PTY)
-```
 
-### Ghostty架构（已验证）
-```
-IPC → App → Surface → Termio → Terminal → PTY
-       ↑
-   对应tmux server层
-   (管理所有Surface实例)
-```
+### 核心洞察（从架构图中学到的）
+- **tmux 模式**：Session 拥有一切（Terminal、PTY、进程），Client 只是查看器
+- **当前问题**：Ghostty 架构颠倒 - Surface 拥有 Terminal（错误）
+- **解决方案**：SessionCore 必须拥有 Terminal，Surface 只能查看
 
-### 关键代码路径
-- **tmux**: `cmd-send-keys.c` → `window_pane_key()` → `input_key_pane()` → `bufferevent_write()`
-- **Ghostty**: `App.zig` → `Surface.zig` → `Termio.zig` → `backend.write()`
+## 📌 当前任务：修复 attach 功能
 
-## 🎯 最小化实现方案
+### 问题诊断（参考 ghostty-tmux-gap-analysis.puml）
+当前 `@ghostty attach session-name` 命令不工作，原因是架构设计错误：
+- ❌ **现状**：Surface 拥有 Terminal，SessionCore 只有引用
+- ✅ **目标**：SessionCore 拥有 Terminal，Surface 只是查看器
 
-### Phase 1: 核心功能（MVP）
-1. 在App层添加SessionManager
-2. 扩展IPC支持send_to_session
-3. Surface添加session_id
-4. 实现基本的消息路由
-
-### Phase 2: SSH支持
-1. 利用现有shell integration
-2. 通过OSC 777建立通信通道
-3. 环境变量传递session信息
-
-### Phase 3: 用户体验
-1. 实现@send, @link命令
-2. 添加会话管理命令
-3. 可视化状态显示
-
-## ⚙️ 技术实现细节
-
-### 关键文件修改
-```
-src/App.zig                    # 添加SessionManager
-src/Surface.zig                # 添加session_id字段
-src/apprt/ipc.zig             # 扩展Action枚举
-src/terminal/SessionManager.zig # 新增核心管理器
-src/termio/Termio.zig         # 消息拦截点
-```
-
-### 通信协议
-- **本地**: D-Bus IPC + 直接PTY写入
-- **远程**: OSC 777序列 + Shell Integration
-
-### 命令设计
+### 期望效果
 ```bash
-# 内部命令（终端内）
-@send <session-id> <command>
-@link <session-id>
-@sessions
+# Terminal A
+@ghostty session alpha
+echo "This is session alpha"
 
-# 外部命令（命令行）
-ghostty send <session-id> <command>
-ghostty link <session-id>
+# Terminal B  
+@ghostty session beta
+echo "This is session beta"
+
+# Terminal A 执行
+@ghostty attach beta
+
+# 结果：Terminal A 立即显示 "This is session beta"
 ```
 
-## 📋 代码集成检查清单
+## 🏗️ 实施计划（基于 implementation-roadmap.puml）
 
-### 必须完成
-- [ ] App.zig集成SessionManager
-- [ ] IPC Action扩展
-- [ ] Surface session_id实现
-- [ ] 基本send功能
-- [ ] 单元测试
+### Phase 4.1：SessionCore 拥有 Terminal
+修改 `src/terminal/SessionCore.zig`：
+```zig
+pub const SessionCore = struct {
+    owned_terminal: Terminal,  // 不再是引用
+    owned_pty: PTY,           // 不再是引用
+    shell_process: Process,   // 管理 shell 进程
+};
+```
 
-### 应该完成
-- [ ] Shell integration集成
-- [ ] OSC 777协议
-- [ ] 会话持久化
-- [ ] 错误处理
+### Phase 4.2：Surface 变为查看器
+修改 `src/Surface.zig`：
+```zig
+pub const Surface = struct {
+    session_core: *SessionCore,  // 必需，指向查看目标
+    // 移除 io: Termio（不再拥有 Terminal）
+};
+```
 
-### 可以完成
-- [ ] GUI管理界面
-- [ ] 高级过滤器
-- [ ] 性能监控
+### Phase 4.3：实现 attach 切换
+```zig
+pub fn attachToSession(surface: *Surface, session_core: *SessionCore) {
+    surface.session_core = session_core;      // 切换指针
+    renderer.switchTerminal(session_core.terminal);  // 更新渲染
+    renderer.forceFullRedraw();               // 立即重绘
+}
+```
 
-## 🚫 避免的陷阱
+## 🔧 如何编译运行
 
-1. **不要**试图提取tmux代码
-2. **不要**创建独立的库
-3. **不要**过度抽象和设计
-4. **不要**偏离核心需求
-5. **不要**引入不必要的依赖
+### 构建项目
+```bash
+cd /Users/jqwang/98-ghosttyAI/ghostty
+make run
+```
 
-## 📊 成功标准
+### 调试模式
+```bash
+cd /Users/jqwang/98-ghosttyAI/ghostty
+GHOSTTY_LOG=debug make run 2>debug.log
+```
 
-### 功能标准
-- ✅ 终端A能发送命令到终端B
-- ✅ 支持双向通信
-- ✅ SSH远程场景可用
-- ✅ 命令简洁直观
+### 测试 attach 功能
+```bash
+# 运行测试脚本
+bash test-phase4-switching.sh
 
-### 技术标准
-- ✅ 代码修改最小化（<10个文件）
-- ✅ 不影响现有功能
-- ✅ 性能开销可忽略
-- ✅ 易于测试和调试
+# 或手动测试
+# 1. 打开两个 Ghostty 终端
+# 2. Terminal 1: @ghostty session alpha
+# 3. Terminal 2: @ghostty session beta  
+# 4. Terminal 1: @ghostty attach beta
+# 5. 验证 Terminal 1 是否切换到 beta 的内容
+```
 
-## 🔧 开发原则
-
-1. **KISS原则**：保持简单直接
-2. **最小侵入**：尽量少修改现有代码
-3. **增量开发**：先实现核心，再添加功能
-4. **代码优先**：用代码验证想法
-5. **用户体验**：命令要直观易用
-
-## 📝 项目状态
-
-### 已完成
-- ✅ 架构分析和验证
-- ✅ 实现方案设计
-- ✅ SessionManager原型
-- ✅ 演示脚本
-
-### 进行中
-- 🔄 代码集成规划
-- 🔄 Agent角色设计
-
-### 待开始
-- ⏳ 实际代码集成
-- ⏳ 测试和调试
-- ⏳ 文档完善
-
-## 🤖 AI助手指导
-
-### 对话原则
-1. 始终基于源码讨论，不要想象
-2. 优先考虑最小化实现
-3. 每个决策都要有代码支撑
-4. 保持聚焦在核心需求
-
-### 代码原则
-1. 修改前先读取现有代码
-2. 每次修改控制在最小范围
-3. 保持代码风格一致
-4. 添加必要的注释
-
-### 测试原则
-1. 先写测试，后写代码
-2. 测试覆盖核心路径
-3. 包含错误场景测试
-
-## 📚 参考资源
-
-### 关键文档
-- `docs/tmux-ghostty-架构对比文档.md`
-- `docs/ghostty-terminal-communication-design.md`
-- `scripts/demo-ghostty-terminal-comm.sh`
-
-### 核心代码
-- `src/terminal/SessionManager.zig`
-- `src/terminal/demo_terminal_communication.zig`
+## ✅ 成功标准
+- `@ghostty attach` 命令能瞬间切换会话
+- 关闭窗口不影响会话持续运行
+- 多个窗口可以同时查看同一会话
 
 ---
 
-**记住**：成功的关键是**简单、直接、最小化**。不要重复前两次的错误！
+**核心理念**：像 tmux 一样，Session 拥有一切，Surface 只是查看器。
+
+**记住**：实施前务必查看架构图 → `open /Users/jqwang/98-ghosttyAI/diagrams/index.html`

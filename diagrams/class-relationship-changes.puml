@@ -1,0 +1,55 @@
+@startuml class-relationship-changes
+!theme cerulean
+title 关键类关系的变化
+
+package "变化前" {
+    class "Surface_Before" as SB {
+        - io: Termio [owns]
+        - terminal: Terminal [owns via io]
+    }
+    
+    class "Termio_Before" as TB {
+        - terminal: Terminal [owns]
+    }
+    
+    class "Terminal_Before" as TermB {
+        独立存在
+    }
+    
+    SB *-- TB: composition
+    TB *-- TermB: composition
+}
+
+package "变化后" {
+    class "Surface_After" as SA {
+        - io: Termio [owns]
+        - session_core: *SessionCore [ref]
+    }
+    
+    class "Termio_After" as TA {
+        - terminal: union{owned,borrowed}
+    }
+    
+    class "SessionCore_After" as SC {
+        - terminal: Terminal [owns]
+        - surfaces: []*Surface [weak ref]
+    }
+    
+    class "Terminal_After" as TermA {
+        被SessionCore拥有
+    }
+    
+    SA o-- SC: association
+    SA *-- TA: composition
+    SC *-- TermA: composition
+    TA ..> TermA: borrows
+}
+
+note bottom
+  核心变化：
+  1. Terminal的所有权从Termio转移到SessionCore
+  2. Surface通过SessionCore间接访问Terminal
+  3. 多个Surface可以共享同一个SessionCore/Terminal
+end note
+
+@enduml

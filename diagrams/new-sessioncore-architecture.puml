@@ -1,0 +1,129 @@
+@startuml new-sessioncore-architecture
+!theme cerulean
+title 新SessionCore架构 - 学习tmux的所有权模式
+
+package "App Layer (类似tmux server)" {
+    class App {
+        - surfaces: ArrayList(Surface)
+        - session_manager: SessionManager
+        + createSurface()
+        + attachSurfaceToSession(surface, session_name)
+        + mailbox: Mailbox
+    }
+    
+    class SessionManager {
+        - sessions: HashMap(name->SessionCore*)
+        - surface_sessions: HashMap(surface_ptr->session_name)
+        + getOrCreateSession(name): SessionCore*
+        + attachSurface(surface, session_name)
+        + detachSurface(surface)
+    }
+}
+
+package "SessionCore Layer (类似tmux session - 持久实体)" #LightGreen {
+    class SessionCore {
+        - id: String
+        - **owned_terminal: Terminal** ⬅️ 真正拥有
+        - **owned_pty: PTY** ⬅️ 真正拥有  
+        - **shell_process: Process** ⬅️ 真正拥有
+        - attached_surfaces: ArrayList(Surface*)
+        - created_time: i64
+        - last_attached_time: i64
+        - is_detached: bool
+        + **createOwnedTerminal(cols, rows)**
+        + **getTerminalForViewing(): Terminal***
+        + **attachViewer(surface)**
+        + **detachViewer(surface)**
+        + **writeInput(data)** ⬅️ 直接写入自己的PTY
+    }
+    
+    class Terminal {
+        - screen: Screen
+        - scrollback: Scrollback  
+        - cursor: Cursor
+        - modes: Modes
+        + write(data)
+        + read(): String
+        + serialize(): Snapshot
+        + deserialize(snapshot)
+    }
+    
+    class PTY {
+        - fd: FileDescriptor
+        - child_pid: ProcessID
+        + spawn(shell, cwd)
+        + read(): bytes
+        + write(bytes)
+        + resize(cols, rows)
+    }
+}
+
+package "Surface Layer (类似tmux client - 临时查看器)" #LightBlue {
+    class Surface {
+        - **session_core: SessionCore*** ⬅️ 查看目标(可切换)
+        - renderer_state: RendererState
+        - config: Config
+        - font: Font
+        - **不再拥有Terminal或PTY**
+        + **attachToSession(session_core)**
+        + **render()** ⬅️ 渲染session_core的内容
+        + **keyCallback(key)** ⬅️ 转发到session_core
+    }
+    
+    class RendererState {
+        - **terminal: Terminal*** ⬅️ 指向SessionCore的Terminal
+        - mutex: Mutex
+        + **switchTerminal(new_terminal)**
+        + **forceFullRedraw()**
+    }
+}
+
+' 新的所有权关系
+App *-- SessionManager: owns
+SessionManager *-- "n" SessionCore: **真正管理持久会话**
+SessionCore *-- Terminal: **拥有**
+SessionCore *-- PTY: **拥有**
+Terminal *-- "screen+scrollback": **拥有所有内容**
+
+' Surface只是查看器
+App *-- "n" Surface: manages viewers
+Surface --> SessionCore: **views** (可切换)
+RendererState --> Terminal: **renders from SessionCore**
+
+' PTY和Shell属于SessionCore
+PTY --> "Shell Process": **SessionCore拥有进程**
+
+note right of SessionCore
+  **新架构的核心：SessionCore拥有一切**
+  
+  ✅ 拥有Terminal（屏幕内容、历史、光标）
+  ✅ 拥有PTY（文件描述符、shell进程）  
+  ✅ 拥有Shell进程（独立生命周期）
+  ✅ 持久化存在（Surface关闭不影响）
+  ✅ 多Surface可同时查看同一Session
+  
+  **就像tmux的Session一样！**
+end note
+
+note right of Surface
+  **Surface的新角色：纯查看器**
+  
+  ❌ 不再拥有Terminal或PTY
+  ✅ 只负责渲染和用户交互
+  ✅ 通过session_core指针查看内容
+  ✅ 可以随时切换查看目标
+  ✅ 关闭不影响Session持久化
+  
+  **就像tmux的Client一样！**
+end note
+
+note bottom of App
+  **新的attach流程（学习tmux）：**
+  1. Surface.attachToSession(new_session_core)
+  2. surface.session_core = new_session_core
+  3. renderer_state.terminal = new_session_core.terminal
+  4. renderer.forceFullRedraw()
+  5. 完成！简单如tmux
+end note
+
+@enduml
