@@ -2382,6 +2382,29 @@ pub fn keyCallback(
                                 t.linefeed() catch {};
                             }
                         }
+                    } else if (std.mem.startsWith(u8, subcmd, "attach ")) {
+                        // @ghostty attach <session-id>  ->  同时切换渲染与输入
+                        const args = std.mem.trim(u8, subcmd[7..], " ");
+                        if (args.len == 0) {
+                            self.renderer_state.mutex.lock();
+                            defer self.renderer_state.mutex.unlock();
+                            const t: *terminal.Terminal = self.renderer_state.terminal;
+                            t.carriageReturn();
+                            t.linefeed() catch {};
+                            t.printString("Usage: @ghostty attach <session-id>") catch {};
+                            t.linefeed() catch {};
+                        } else {
+                            // 渲染切换
+                            _ = self.app.mailbox.push(.{ .attach_render = .{
+                                .from_surface = self,
+                                .target = try self.alloc.dupe(u8, args),
+                            } }, .{ .ns = 100_000_000 });
+                            // 输入转发
+                            _ = self.app.mailbox.push(.{ .attach_io = .{
+                                .from_surface = self,
+                                .target = try self.alloc.dupe(u8, args),
+                            } }, .{ .ns = 100_000_000 });
+                        }
                     } else if (std.mem.startsWith(u8, subcmd, "attach-render ")) {
                         // @ghostty attach-render <session-id>
                         const args = std.mem.trim(u8, subcmd[14..], " ");
@@ -2400,6 +2423,14 @@ pub fn keyCallback(
                                 .target = try self.alloc.dupe(u8, args),
                             } }, .{ .ns = 100_000_000 });
                         }
+                    } else if (std.mem.eql(u8, std.mem.trim(u8, subcmd, " "), "detach")) {
+                        // @ghostty detach -> 同时恢复本地渲染与本地输入
+                        _ = self.app.mailbox.push(.{ .attach_render_reset = .{
+                            .from_surface = self,
+                        } }, .{ .ns = 100_000_000 });
+                        _ = self.app.mailbox.push(.{ .detach_io = .{
+                            .from_surface = self,
+                        } }, .{ .ns = 100_000_000 });
                     } else if (std.mem.eql(u8, std.mem.trim(u8, subcmd, " "), "detach-render")) {
                         // @ghostty detach-render -> 恢复本地渲染
                         _ = self.app.mailbox.push(.{ .attach_render_reset = .{
