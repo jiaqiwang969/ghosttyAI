@@ -26,6 +26,7 @@ const log = std.log.scoped(.app);
 
 const SurfaceList = std.ArrayListUnmanaged(*apprt.Surface);
 const SessionManager = @import("terminal/SessionManager.zig");
+const SessionCore = @import("terminal/SessionCore.zig").SessionCore;
 
 /// General purpose allocator
 alloc: Allocator,
@@ -391,16 +392,20 @@ pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
 
 /// 在当前 surface 上将渲染目标切换为目标会话对应 Surface 的 terminal 指针
 pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
-    // 定位目标 Surface
+    // 定位目标 Surface（渲染直接查看对方的 Terminal，保证与输入转发一致）
     const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
     const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
 
-    // 加锁并切换 renderer_state.terminal 指针到目标的 terminal
     from.renderer_state.mutex.lock();
     from.renderer_state.terminal = &target_surface.io.terminal;
     // 标记全量重绘
     from.renderer_state.terminal.flags.dirty.clear = true;
     from.renderer_state.mutex.unlock();
+
+    // 登记查看器附着关系（仅元数据）
+    self.session_manager.attachViewer(target_name, from) catch |err| {
+        log.warn("attachViewer registry failed: {}", .{err});
+    };
 
     // 请求重绘
     try from.queueRender();
@@ -425,6 +430,9 @@ pub fn attachRenderReset(self: *App, from: *Surface) !void {
     from.renderer_state.terminal.flags.dirty.clear = true;
     from.renderer_state.mutex.unlock();
 
+    // 解除查看器附着登记
+    self.session_manager.detachViewer(from);
+
     try from.queueRender();
 
     from.renderer_state.mutex.lock();
@@ -438,8 +446,8 @@ pub fn attachRenderReset(self: *App, from: *Surface) !void {
 
 /// 绑定输入：将 from 的键盘输入转发到 target 会话对应的 Surface 的 PTY
 pub fn attachIO(self: *App, from: *Surface, target_name: []const u8) !void {
-    const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
-    const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
+    // legacy lookup retained intentionally to keep side effects of registration
+    _ = self.session_manager.getSurfaceById(target_name);
 
     // 保存目标名到 from.io_attach_target（先释放旧值）
     if (from.io_attach_target) |old| from.alloc.free(old);
@@ -458,7 +466,7 @@ pub fn attachIO(self: *App, from: *Surface, target_name: []const u8) !void {
     // 轻量重绘
     try from.queueRender();
 
-    _ = target_surface; // silence for now
+    // no-op
 }
 
 /// 解除输入转发

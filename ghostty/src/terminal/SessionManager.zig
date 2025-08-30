@@ -7,8 +7,12 @@ pub const SessionManager = @This();
 
 const SessionId = []const u8;
 const SessionMap = std.StringHashMap(*SessionInfo);
+const CoreMap = std.StringHashMap(*SessionCore);
 const LinkList = std.ArrayList(SessionLink);
 const PointerMap = std.AutoHashMap(usize, []const u8);  // Map surface pointer to session name
+const SessionCore = @import("SessionCore.zig").SessionCore;
+const ViewersMap = std.StringHashMap(std.ArrayListUnmanaged(*anyopaque));
+const ViewerPointerMap = std.AutoHashMap(usize, []const u8); // viewer surface ptr -> target session id
 
 /// 会话信息
 const SessionInfo = struct {
@@ -46,21 +50,29 @@ pub const Message = struct {
 // SessionManager 字段
 allocator: Allocator,
 sessions: SessionMap,
+cores: CoreMap,
 pointer_map: PointerMap,  // Quick lookup by pointer
 links: LinkList,
 message_queue: std.ArrayList(Message),
 mutex: std.Thread.Mutex,
 next_auto_id: u32,  // For auto-generated names
 
+// 附着关系：一个会话可被多个查看器(Surface)附着
+viewers: ViewersMap,
+viewer_pointer_map: ViewerPointerMap,
+
 pub fn init(allocator: Allocator) SessionManager {
     return .{
         .allocator = allocator,
         .sessions = SessionMap.init(allocator),
+        .cores = CoreMap.init(allocator),
         .pointer_map = PointerMap.init(allocator),
         .links = LinkList.init(allocator),
         .message_queue = std.ArrayList(Message).init(allocator),
         .mutex = std.Thread.Mutex{},
         .next_auto_id = 0,
+        .viewers = ViewersMap.init(allocator),
+        .viewer_pointer_map = ViewerPointerMap.init(allocator),
     };
 }
 
@@ -72,7 +84,22 @@ pub fn deinit(self: *SessionManager) void {
         self.allocator.destroy(entry.value_ptr.*);
     }
     self.sessions.deinit();
+    // 清理 cores
+    var citer = self.cores.iterator();
+    while (citer.next()) |entry| {
+        entry.value_ptr.*.deinit(self.allocator);
+        self.allocator.free(entry.key_ptr.*);
+    }
+    self.cores.deinit();
     self.pointer_map.deinit();
+    // 清理 viewers
+    var viter = self.viewers.iterator();
+    while (viter.next()) |entry| {
+        if (entry.value_ptr.*.capacity > 0) entry.value_ptr.*.deinit(self.allocator);
+        self.allocator.free(entry.key_ptr.*);
+    }
+    self.viewers.deinit();
+    self.viewer_pointer_map.deinit();
     
     // 清理链接
     for (self.links.items) |link| {
@@ -128,6 +155,13 @@ pub fn registerSession(
     
     try self.sessions.put(id, info);
     try self.pointer_map.put(@intFromPtr(surface_ptr), id);
+
+    // 确保 SessionCore 存在（以默认尺寸创建骨架）
+    if (!self.cores.contains(id)) {
+        var core = try SessionCore.init(self.allocator, id, 80, 24);
+        errdefer core.deinit(self.allocator);
+        try self.cores.put(try self.allocator.dupe(u8, id), core);
+    }
     
     std.log.info("Registered session: {s} (remote: {any})", .{ 
         id, 
@@ -184,6 +218,59 @@ pub fn getSurfaceById(self: *SessionManager, id: []const u8) ?*anyopaque {
         return info.surface_ptr;
     }
     return null;
+}
+
+/// 获取/创建 SessionCore
+pub fn getOrCreateCore(self: *SessionManager, id: []const u8) !*SessionCore {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    if (self.cores.get(id)) |core| return core;
+    var core = try SessionCore.init(self.allocator, id, 80, 24);
+    errdefer core.deinit(self.allocator);
+    try self.cores.put(try self.allocator.dupe(u8, id), core);
+    return core;
+}
+
+/// 将某个查看器附着到指定会话（仅登记关系，不做渲染/IO）
+pub fn attachViewer(self: *SessionManager, session_id: []const u8, viewer_surface: *anyopaque) !void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    // Ensure viewer list exists and get a pointer to it
+    var list_ptr: *std.ArrayListUnmanaged(*anyopaque) = blk: {
+        if (self.viewers.getPtr(session_id)) |p| break :blk p;
+        const sid_copy = try self.allocator.dupe(u8, session_id);
+        try self.viewers.put(sid_copy, .{});
+        break :blk self.viewers.getPtr(sid_copy).?;
+    };
+
+    // Append viewer to list
+    try list_ptr.append(self.allocator, viewer_surface);
+    // Update maps
+    try self.viewer_pointer_map.put(@intFromPtr(viewer_surface), try self.allocator.dupe(u8, session_id));
+}
+
+/// 将查看器从其附着的会话上分离
+pub fn detachViewer(self: *SessionManager, viewer_surface: *anyopaque) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    const sid = self.viewer_pointer_map.fetchRemove(@intFromPtr(viewer_surface)) orelse return;
+    const session_id = sid.value;
+    if (self.viewers.get(session_id)) |*list| {
+        var i: usize = 0;
+        while (i < list.items.len) {
+            if (list.items[i] == viewer_surface) {
+                _ = list.swapRemove(i);
+                continue;
+            }
+            i += 1;
+        }
+        if (list.items.len == 0) {
+            _ = self.viewers.remove(session_id);
+            self.allocator.free(session_id);
+        }
+    }
 }
 
 /// 发送消息到指定会话
