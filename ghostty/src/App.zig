@@ -295,6 +295,26 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
                     msg.surface.displaySessionName(name);
                 }
             },
+            .attach_render => |msg| {
+                self.attachRender(msg.from_surface, msg.target) catch |err| {
+                    log.warn("Failed to attach-render: {}", .{err});
+                };
+            },
+            .attach_render_reset => |msg| {
+                self.attachRenderReset(msg.from_surface) catch |err| {
+                    log.warn("Failed to detach-render: {}", .{err});
+                };
+            },
+            .attach_io => |msg| {
+                self.attachIO(msg.from_surface, msg.target) catch |err| {
+                    log.warn("Failed to attach-io: {}", .{err});
+                };
+            },
+            .detach_io => |msg| {
+                self.detachIO(msg.from_surface) catch |err| {
+                    log.warn("Failed to detach-io: {}", .{err});
+                };
+            },
 
             // If we're quitting, then we set the quit flag and stop
             // draining the mailbox immediately. This lets us defer
@@ -367,6 +387,96 @@ pub fn registerSessionWithName(self: *App, surface: *Surface, name: []const u8) 
 /// Get the current session name for a surface
 pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
     return self.session_manager.getSessionByPointer(surface);
+}
+
+/// 在当前 surface 上将渲染目标切换为目标会话对应 Surface 的 terminal 指针
+pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
+    // 定位目标 Surface
+    const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
+    const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
+
+    // 加锁并切换 renderer_state.terminal 指针到目标的 terminal
+    from.renderer_state.mutex.lock();
+    from.renderer_state.terminal = &target_surface.io.terminal;
+    // 标记全量重绘
+    from.renderer_state.terminal.flags.dirty.clear = true;
+    from.renderer_state.mutex.unlock();
+
+    // 请求重绘
+    try from.queueRender();
+
+    // 文本反馈
+    from.renderer_state.mutex.lock();
+    const t = from.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("[ghostty] attach-render -> ") catch {};
+    t.printString(target_name) catch {};
+    t.linefeed() catch {};
+    from.renderer_state.mutex.unlock();
+}
+
+/// 恢复本地渲染：让 from.surface 重新指向自身 io.terminal
+pub fn attachRenderReset(self: *App, from: *Surface) !void {
+    _ = self; // unused
+
+    from.renderer_state.mutex.lock();
+    from.renderer_state.terminal = &from.io.terminal;
+    from.renderer_state.terminal.flags.dirty.clear = true;
+    from.renderer_state.mutex.unlock();
+
+    try from.queueRender();
+
+    from.renderer_state.mutex.lock();
+    const t = from.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("[ghostty] detach-render -> local") catch {};
+    t.linefeed() catch {};
+    from.renderer_state.mutex.unlock();
+}
+
+/// 绑定输入：将 from 的键盘输入转发到 target 会话对应的 Surface 的 PTY
+pub fn attachIO(self: *App, from: *Surface, target_name: []const u8) !void {
+    const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
+    const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
+
+    // 保存目标名到 from.io_attach_target（先释放旧值）
+    if (from.io_attach_target) |old| from.alloc.free(old);
+    from.io_attach_target = try from.alloc.dupe(u8, target_name);
+
+    // 反馈
+    from.renderer_state.mutex.lock();
+    const t = from.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("[ghostty] attach-io -> ") catch {};
+    t.printString(target_name) catch {};
+    t.linefeed() catch {};
+    from.renderer_state.mutex.unlock();
+
+    // 轻量重绘
+    try from.queueRender();
+
+    _ = target_surface; // silence for now
+}
+
+/// 解除输入转发
+pub fn detachIO(self: *App, from: *Surface) !void {
+    _ = self;
+    if (from.io_attach_target) |old| {
+        from.alloc.free(old);
+        from.io_attach_target = null;
+    }
+
+    from.renderer_state.mutex.lock();
+    const t = from.renderer_state.terminal;
+    t.carriageReturn();
+    t.linefeed() catch {};
+    t.printString("[ghostty] detach-io -> local") catch {};
+    t.linefeed() catch {};
+    from.renderer_state.mutex.unlock();
+    try from.queueRender();
 }
 
 /// Create a new window
@@ -641,6 +751,28 @@ pub const Message = union(enum) {
     /// Get current session name for a surface
     get_session: struct {
         surface: *Surface,
+    },
+
+    /// Attach current surface's renderer to target session's terminal (render-only)
+    attach_render: struct {
+        from_surface: *Surface,
+        target: []const u8,
+    },
+
+    /// Reset current surface to render its own local terminal
+    attach_render_reset: struct {
+        from_surface: *Surface,
+    },
+
+    /// Attach current surface's input to target session's PTY
+    attach_io: struct {
+        from_surface: *Surface,
+        target: []const u8,
+    },
+
+    /// Detach current surface's input forwarding
+    detach_io: struct {
+        from_surface: *Surface,
     },
 
     const NewWindow = struct {

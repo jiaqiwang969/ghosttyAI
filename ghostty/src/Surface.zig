@@ -152,6 +152,10 @@ selection_scroll_active: bool = false,
 /// Generated from Surface pointer address for uniqueness
 session_id: [32]u8 = undefined,
 
+/// Optional target session name for input forwarding. If set, keyboard
+/// input will be sent to this target session's PTY via App/SessionManager
+io_attach_target: ?[]u8 = null,
+
 /// The effect of an input event. This can be used by callers to take
 /// the appropriate action after an input event. For example, key
 /// input can be forwarded to the OS for further processing if it
@@ -1992,7 +1996,7 @@ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
 /// This queues a render operation with the renderer thread. The render
 /// isn't guaranteed to happen immediately but it will happen as soon as
 /// practical.
-fn queueRender(self: *Surface) !void {
+pub fn queueRender(self: *Surface) !void {
     try self.renderer_thread.wakeup.notify();
 }
 
@@ -2378,6 +2382,29 @@ pub fn keyCallback(
                                 t.linefeed() catch {};
                             }
                         }
+                    } else if (std.mem.startsWith(u8, subcmd, "attach-render ")) {
+                        // @ghostty attach-render <session-id>
+                        const args = std.mem.trim(u8, subcmd[14..], " ");
+                        if (args.len == 0) {
+                            self.renderer_state.mutex.lock();
+                            defer self.renderer_state.mutex.unlock();
+                            const t: *terminal.Terminal = self.renderer_state.terminal;
+                            t.carriageReturn();
+                            t.linefeed() catch {};
+                            t.printString("Usage: @ghostty attach-render <session-id>") catch {};
+                            t.linefeed() catch {};
+                        } else {
+                            // 将请求投递给 App，由 App 解析到目标 Surface 并执行渲染切换
+                            _ = self.app.mailbox.push(.{ .attach_render = .{
+                                .from_surface = self,
+                                .target = try self.alloc.dupe(u8, args),
+                            } }, .{ .ns = 100_000_000 });
+                        }
+                    } else if (std.mem.eql(u8, std.mem.trim(u8, subcmd, " "), "detach-render")) {
+                        // @ghostty detach-render -> 恢复本地渲染
+                        _ = self.app.mailbox.push(.{ .attach_render_reset = .{
+                            .from_surface = self,
+                        } }, .{ .ns = 100_000_000 });
                     } else if (std.mem.startsWith(u8, subcmd, "session")) {
                         // @ghostty session [name] - register or get session
                         const args = std.mem.trim(u8, subcmd[7..], " ");
@@ -2403,6 +2430,26 @@ pub fn keyCallback(
                                 .surface = self,
                             } }, .{ .ns = 100_000_000 });
                         }
+                    } else if (std.mem.startsWith(u8, subcmd, "attach-io ")) {
+                        const args = std.mem.trim(u8, subcmd[10..], " ");
+                        if (args.len == 0) {
+                            self.renderer_state.mutex.lock();
+                            defer self.renderer_state.mutex.unlock();
+                            const t: *terminal.Terminal = self.renderer_state.terminal;
+                            t.carriageReturn();
+                            t.linefeed() catch {};
+                            t.printString("Usage: @ghostty attach-io <session-id>") catch {};
+                            t.linefeed() catch {};
+                        } else {
+                            _ = self.app.mailbox.push(.{ .attach_io = .{
+                                .from_surface = self,
+                                .target = try self.alloc.dupe(u8, args),
+                            } }, .{ .ns = 100_000_000 });
+                        }
+                    } else if (std.mem.eql(u8, std.mem.trim(u8, subcmd, " "), "detach-io")) {
+                        _ = self.app.mailbox.push(.{ .detach_io = .{
+                            .from_surface = self,
+                        } }, .{ .ns = 100_000_000 });
                     } else {
                         // Unknown subcommand
                         self.renderer_state.mutex.lock();

@@ -175,6 +175,17 @@ pub fn unregisterSession(self: *SessionManager, id: []const u8) void {
     }
 }
 
+/// 通过会话ID获取对应的 Surface 指针（anyopaque）。找不到返回 null。
+pub fn getSurfaceById(self: *SessionManager, id: []const u8) ?*anyopaque {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    if (self.sessions.get(id)) |info| {
+        return info.surface_ptr;
+    }
+    return null;
+}
+
 /// 发送消息到指定会话
 pub fn sendToSession(
     self: *SessionManager,
