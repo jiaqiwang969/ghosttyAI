@@ -1,0 +1,107 @@
+---
+alwaysApply: true
+description: Ghostty 会话管理（类似 tmux）架构与执行要点，基于 CLAUDE.md 的精炼规则
+---
+
+# Ghostty 会话管理规则（基于 CLAUDE.md）
+
+本规则总结自 [CLAUDE.md](mdc:CLAUDE.md)，用于指导在 Ghostty 中实现类似 tmux 的会话管理（attach/detach、会话持久化、多窗口查看同一会话）。
+
+## 项目目标
+- 在不同终端窗口之间切换会话（attach/detach）
+- 关闭窗口会话不丢失（持久化）
+- 多个窗口可同时查看同一会话
+
+## 架构参考（必读）
+- 打开架构索引： [diagrams/index.html](mdc:diagrams/index.html)
+- 关键图：
+  - [diagrams/tmux-attach-architecture.puml](mdc:diagrams/tmux-attach-architecture.puml)：tmux 的 Session-Client 分离架构
+  - [diagrams/ghostty-tmux-gap-analysis.puml](mdc:diagrams/ghostty-tmux-gap-analysis.puml)：当前问题根因分析
+  - [diagrams/new-sessioncore-architecture.puml](mdc:diagrams/new-sessioncore-architecture.puml)：目标架构
+  - [diagrams/implementation-roadmap.puml](mdc:diagrams/implementation-roadmap.puml)：Phase 4 实施步骤
+
+### 核心洞察
+- tmux 模式：Session 拥有一切（Terminal、PTY、进程），Client 只是查看器
+- 现有问题：Ghostty 中 Surface 拥有 Terminal（错误归属）
+- 目标方案：SessionCore 拥有 Terminal，Surface 作为查看器引用 SessionCore
+
+## 当前重点：修复 attach 功能
+- 现状：`@ghostty attach session-name` 无法正确切换
+- 目标：从 Surface 切换到指定 SessionCore 的 Terminal 并立即重绘
+
+### 期望行为示例
+```bash
+# Terminal A
+@ghostty session alpha
+echo "This is session alpha"
+
+# Terminal B
+@ghostty session beta
+echo "This is session beta"
+
+# Terminal A
+@ghostty attach beta
+# 结果：A 终端应立即显示 beta 的内容
+```
+
+## 实施要点（Phase 4 摘要）
+
+1) SessionCore 拥有 Terminal/PTY/进程（示意，参照 CLAUDE.md）
+```zig
+pub const SessionCore = struct {
+    owned_terminal: Terminal,
+    owned_pty: PTY,
+    shell_process: Process,
+};
+```
+
+2) Surface 仅作为查看器，持有指向 SessionCore 的引用
+```zig
+pub const Surface = struct {
+    session_core: *SessionCore,
+    // 不再直接拥有 Termio/Terminal
+};
+```
+
+3) 实现 attach 切换（示意）
+```zig
+pub fn attachToSession(surface: *Surface, session_core: *SessionCore) {
+    surface.session_core = session_core;
+    renderer.switchTerminal(session_core.terminal);
+    renderer.forceFullRedraw();
+}
+```
+
+## 构建与调试
+项目根：`/Users/jqwang/98-ghosttyAI/ghostty`
+
+```bash
+cd /Users/jqwang/98-ghosttyAI/ghostty
+make run
+```
+
+调试日志：
+```bash
+cd /Users/jqwang/98-ghosttyAI/ghostty
+GHOSTTY_LOG=debug make run 2>debug.log
+```
+
+## 测试 attach
+脚本或手动测试均可，详见：
+- [ghostty/docs/terminal-communication-test-guide.md](mdc:ghostty/docs/terminal-communication-test-guide.md)
+- [ghostty/docs/terminal-communication-test-results.md](mdc:ghostty/docs/terminal-communication-test-results.md)
+
+示例脚本（若存在）
+```bash
+bash test-phase4-switching.sh
+```
+
+## 成功标准
+- `@ghostty attach` 能瞬时切换目标会话
+- 关闭窗口会话仍保持运行
+- 多窗口可同时查看同一会话
+
+---
+核心理念：像 tmux 一样，Session 拥有一切，Surface 只是查看器。
+在实施前，务必先阅读 [CLAUDE.md](mdc:CLAUDE.md) 与架构图索引 [diagrams/index.html](mdc:diagrams/index.html)。
+
