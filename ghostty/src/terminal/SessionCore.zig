@@ -17,6 +17,9 @@ owned_terminal: terminalpkg.Terminal,
 /// 附加的查看器（Surface 指针，避免循环依赖，此处用 anyopaque）
 attached_surfaces: std.ArrayListUnmanaged(*anyopaque) = .{},
 
+/// 预留：PTY 与子进程（占位，不启用）
+has_pty: bool = false,
+
 pub const InitError = anyerror;
 
 pub fn init(alloc: Allocator, id: []const u8, cols: u16, rows: u16) InitError!*SessionCore {
@@ -31,6 +34,7 @@ pub fn init(alloc: Allocator, id: []const u8, cols: u16, rows: u16) InitError!*S
         .id = try alloc.dupe(u8, id),
         .owned_terminal = term,
         .attached_surfaces = .{},
+        .has_pty = false,
     };
     return core;
 }

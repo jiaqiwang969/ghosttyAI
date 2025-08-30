@@ -23,6 +23,7 @@ const objc = @import("objc");
 const termio = @import("termio.zig");
 
 const log = std.log.scoped(.app);
+const process = std.process;
 
 const SurfaceList = std.ArrayListUnmanaged(*apprt.Surface);
 const SessionManager = @import("terminal/SessionManager.zig");
@@ -392,15 +393,36 @@ pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
 
 /// 在当前 surface 上将渲染目标切换为目标会话对应 Surface 的 terminal 指针
 pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
-    // 定位目标 Surface（渲染直接查看对方的 Terminal，保证与输入转发一致）
-    const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
-    const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
+    // 可选特性：通过 SessionCore 获取 Terminal（默认关闭）
+    var used_core_path = false;
+    if (envFlagEnabled("GHOSTTY_USE_SESSIONCORE_RENDER")) core_path: {
+        const core = self.session_manager.getOrCreateCore(target_name) catch |err| {
+            log.warn("attach-render core path disabled due to error: {}", .{err});
+            break :core_path;
+        };
+        // 仅当 SessionCore 已接管 IO（例如 has_pty=true）时才走 core 路径；
+        // 否则回退到 surface 路径以保持可见更新。
+        if (!core.has_pty) break :core_path;
+        from.renderer_state.mutex.lock();
+        from.renderer_state.terminal = core.getTerminalForViewing();
+        from.renderer_state.terminal.flags.dirty.clear = true;
+        from.renderer_state.mutex.unlock();
+        used_core_path = true;
+        log.info("attach-render via SessionCore for {s}", .{target_name});
+    }
 
-    from.renderer_state.mutex.lock();
-    from.renderer_state.terminal = &target_surface.io.terminal;
-    // 标记全量重绘
-    from.renderer_state.terminal.flags.dirty.clear = true;
-    from.renderer_state.mutex.unlock();
+    if (!used_core_path) {
+        // 定位目标 Surface（渲染直接查看对方的 Terminal，保证与输入转发一致）
+        const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
+        const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
+
+        from.renderer_state.mutex.lock();
+        from.renderer_state.terminal = &target_surface.io.terminal;
+        // 标记全量重绘
+        from.renderer_state.terminal.flags.dirty.clear = true;
+        from.renderer_state.mutex.unlock();
+        log.info("attach-render via Surface terminal for {s}", .{target_name});
+    }
 
     // 登记查看器附着关系（仅元数据）
     self.session_manager.attachViewer(target_name, from) catch |err| {
@@ -423,7 +445,6 @@ pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
 
 /// 恢复本地渲染：让 from.surface 重新指向自身 io.terminal
 pub fn attachRenderReset(self: *App, from: *Surface) !void {
-    _ = self; // unused
 
     from.renderer_state.mutex.lock();
     from.renderer_state.terminal = &from.io.terminal;
@@ -442,6 +463,17 @@ pub fn attachRenderReset(self: *App, from: *Surface) !void {
     t.printString("[ghostty] detach-render -> local") catch {};
     t.linefeed() catch {};
     from.renderer_state.mutex.unlock();
+}
+
+/// 读取布尔环境变量，true/1/yes/on 视为开启
+fn envFlagEnabled(name: []const u8) bool {
+    var gpa = std.heap.page_allocator;
+    const val = process.getEnvVarOwned(gpa, name) catch return false;
+    defer gpa.free(val);
+    return std.mem.eql(u8, val, "1")
+        or std.ascii.eqlIgnoreCase(val, "true")
+        or std.ascii.eqlIgnoreCase(val, "yes")
+        or std.ascii.eqlIgnoreCase(val, "on");
 }
 
 /// 绑定输入：将 from 的键盘输入转发到 target 会话对应的 Surface 的 PTY

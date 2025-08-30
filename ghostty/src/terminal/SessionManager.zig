@@ -231,6 +231,12 @@ pub fn getOrCreateCore(self: *SessionManager, id: []const u8) !*SessionCore {
     return core;
 }
 
+/// 可选：获取 SessionCore 持有的 Terminal 以供查看
+pub fn getCoreTerminalForViewing(self: *SessionManager, id: []const u8) ?*(@TypeOf(SessionCore.init).ReturnType) {
+    _ = self; _ = id; // 暂不暴露具体类型指针，后续按需完善
+    return null;
+}
+
 /// 将某个查看器附着到指定会话（仅登记关系，不做渲染/IO）
 pub fn attachViewer(self: *SessionManager, session_id: []const u8, viewer_surface: *anyopaque) !void {
     self.mutex.lock();
@@ -257,7 +263,7 @@ pub fn detachViewer(self: *SessionManager, viewer_surface: *anyopaque) void {
 
     const sid = self.viewer_pointer_map.fetchRemove(@intFromPtr(viewer_surface)) orelse return;
     const session_id = sid.value;
-    if (self.viewers.get(session_id)) |*list| {
+    if (self.viewers.getPtr(session_id)) |list| {
         var i: usize = 0;
         while (i < list.items.len) {
             if (list.items[i] == viewer_surface) {
