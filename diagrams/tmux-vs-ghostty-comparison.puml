@@ -1,0 +1,111 @@
+@startuml tmux-vs-ghostty-comparison
+!theme cerulean
+title tmux vs Ghostty架构对比 - 为什么我们的attach不工作
+
+package "tmux的成功模式" as tmux_success {
+    
+    component "tmux Server (持久进程)" as TmuxServer #LightGreen {
+        
+        component "Session A" as SessionA #Yellow {
+            component "Window 1" as WinA1 {
+                [Pane: PTY+Shell]
+                [Screen: 内容缓冲]
+            }
+            component "Window 2" as WinA2 {
+                [Pane: PTY+Shell]
+                [Screen: 内容缓冲]
+            }
+        }
+        
+        component "Session B" as SessionB #Yellow {
+            component "Window 1" as WinB1 {
+                [Pane: PTY+Shell]  
+                [Screen: 内容缓冲]
+            }
+        }
+    }
+    
+    component "Client 1 (临时)" as Client1 #LightBlue {
+        [TTY输出]
+        [session指针 → Session A]
+    }
+    
+    component "Client 2 (临时)" as Client2 #LightBlue {
+        [TTY输出]
+        [session指针 → Session B]
+    }
+    
+    Client1 --> SessionA: attach查看
+    Client2 --> SessionB: attach查看
+}
+
+package "Ghostty的失败模式" as ghostty_fail {
+    
+    component "Ghostty App" as GhosttyApp #Pink {
+        
+        component "Surface A (窗口)" as SurfaceA #Red {
+            component "Termio A" as TermioA {
+                [Terminal A: 状态]
+                [PTY A: 进程]
+            }
+            [session_core指针]
+        }
+        
+        component "Surface B (窗口)" as SurfaceB #Red {
+            component "Termio B" as TermioB {
+                [Terminal B: 状态]
+                [PTY B: 进程]
+            }
+            [session_core指针]
+        }
+        
+        component "SessionCore (伪管理)" as SessionCore #Orange {
+            [terminal_ref: 只是引用]
+            [不拥有Terminal]
+            [不拥有PTY]
+        }
+    }
+    
+    SurfaceA --> TermioA: 拥有
+    SurfaceB --> TermioB: 拥有
+    SessionCore ..> TermioA: 弱引用
+    SessionCore ..> TermioB: 弱引用
+}
+
+note bottom of tmux_success
+    **tmux成功的原因：**
+    ✅ Session独立于Client存在
+    ✅ Client可以随时attach/detach
+    ✅ 多个Client可查看同一Session
+    ✅ Client断开，Session继续运行
+    ✅ attach只是更新一个指针
+end note
+
+note bottom of ghostty_fail  
+    **Ghostty失败的原因：**
+    ❌ Terminal被Surface拥有
+    ❌ SessionCore只有引用，不拥有
+    ❌ Surface关闭，Terminal销毁
+    ❌ 无法实现真正的detach
+    ❌ attach需要复杂的所有权转移
+end note
+
+note as comparison
+    **关键对比：**
+    
+    | 特性 | tmux | Ghostty |
+    | --- | --- | --- |
+    | Session持久性 | ✅ 独立进程 | ❌ 依赖Surface |
+    | Terminal所有权 | ✅ Session拥有 | ❌ Surface拥有 |
+    | attach机制 | ✅ 指针切换 | ❌ 复杂转移 |
+    | detach后状态 | ✅ 继续运行 | ❌ 被销毁 |
+    | 多Client支持 | ✅ 原生支持 | ❌ 无法实现 |
+    
+    **解决方案：**
+    必须让SessionCore拥有Terminal和PTY，
+    Surface只能借用，不能拥有！
+end note
+
+tmux_success -[hidden]down-> ghostty_fail
+
+@enduml

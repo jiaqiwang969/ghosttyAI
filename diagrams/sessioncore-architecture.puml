@@ -1,0 +1,135 @@
+@startuml sessioncore-architecture
+!theme cerulean
+title Ghostty SessionCore架构 - Phase 1-3 实际实现状态分析
+
+package "App Layer" {
+    class App {
+        - surfaces: ArrayList(Surface)
+        - session_manager: SessionManager
+        + createSurface(attach_to?)
+        + mailbox: Mailbox
+    }
+    
+    class SessionManager {
+        - sessions: HashMap(name->SessionInfo)
+        - cores: HashMap(name->SessionCore) '✅ Phase 1
+        - pointer_map: HashMap(ptr->name)
+        + getOrCreateCore(name): SessionCore '✅ Phase 1
+        + registerSession(name, surface, is_remote)
+        + sendToSession(from, to, message)
+        + isSessionCoreEnabled(): bool '✅ Phase 1
+    }
+}
+
+package "Session Layer (Phase 1-3 部分实现)" #LightYellow {
+    class SessionCore {
+        - id: String '✅
+        - ownership_mode: OwnershipMode '✅ Phase 3
+        - terminal_ref: ?*anyopaque '✅ Phase 1
+        - owned_terminal: ?Terminal '⚠️ Phase 3 定义但未使用
+        - attached_surfaces: ArrayList(*anyopaque) '✅
+        - ref_count: Atomic(u32) '✅
+        - is_detached: bool '⚠️ 标志存在但无效果
+        - terminal_snapshot: ?[]const u8 '❌ 未实现
+        + getTerminalForBorrowing(): ?*Terminal '⚠️ 方法存在但未调用
+        + attachSurfaceWithTerminal(): *Terminal '⚠️ 未被Surface使用
+        + createOwnedTerminal(opts): void '❌ 从未调用
+        + takeTerminalOwnership(terminal): void '❌ 从未调用
+    }
+    
+    note right of SessionCore
+        实际状态:
+        ✅ Phase 1: 基础结构完成
+        ⚠️ Phase 2: 定义但未集成
+        ❌ Phase 3: 关键功能缺失
+        
+        问题:
+        - 无Terminal状态持久化
+        - 无Terminal内容切换
+        - attach仅更新指针
+        - 不影响渲染内容
+    end note
+}
+
+package "Surface Layer (部分改变)" #Orange {
+    class Surface {
+        - io: Termio '仍拥有Terminal
+        - session_id: [32]u8
+        - session_core: ?*anyopaque '✅ Phase 3字段
+        - renderer_state: RendererState
+        + processReceivedMessage(from, msg) '✅
+        + attachToSession() '⚠️ 仅更新指针
+        + detachFromSession() '⚠️ 仅清空指针
+        '❌ 缺失: reinitializeTermio()
+        '❌ 缺失: switchTerminal()
+    }
+    
+    class RendererState {
+        - terminal: *Terminal '仍由Surface拥有
+        + renderWithLock()
+    }
+}
+
+package "I/O Layer (Phase 2 双模式)" #LightBlue {
+    class Termio {
+        - terminal_mode: TerminalMode '✅ Phase 2
+        - terminal_storage: union '✅ Phase 2
+            owned: Terminal
+            borrowed: *Terminal
+        - pty: ?PTY
+        + terminal(): *Terminal '✅
+        '❌ 缺失: reinitialize(borrowed_terminal)
+        '❌ 缺失: switchToBorrowed(terminal)
+    }
+    
+    class Terminal {
+        - screen: Screen
+        - scrollback: Scrollback
+        - cursor: Cursor
+        + write(data)
+        + getSnapshot(): Snapshot
+    }
+    
+    class PTY {
+        - fd: FileDescriptor
+        - child_pid: ProcessID
+        + spawn(shell)
+        + read(): bytes
+        + write(bytes)
+    }
+}
+
+' Phase 1 关系 (当前状态)
+App *-- SessionManager: owns
+SessionManager *-- "n" SessionCore: "owns\n(Phase 1 ✅)"
+
+SessionCore ..> Terminal: "references only\n(Phase 1)"
+SessionCore o-- "n" Surface: "tracks\n(weak ref)"
+
+Surface *-- Termio: "owns\n(未改变)"
+Surface *-- RendererState: owns
+Termio *-- Terminal: "owns\n(Phase 1未改变)"
+Termio *-- PTY: owns
+
+note bottom
+  <b>实际实现状态总结:</b>
+  
+  ✅ 已完成:
+  - SessionCore基础结构
+  - Termio双模式定义
+  - attach/detach命令UI
+  - 消息路由机制
+  
+  ❌ 关键缺失 (Phase 4需求):
+  1. Terminal状态快照/恢复
+  2. Termio运行时重初始化
+  3. 渲染器刷新机制
+  4. PTY管理转移
+  5. 实际内容切换
+  
+  核心问题:
+  attach仅更新了session_core指针，
+  但Terminal内容仍保持不变！
+end note
+
+@enduml

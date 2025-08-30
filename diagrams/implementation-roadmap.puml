@@ -1,0 +1,118 @@
+@startuml implementation-roadmap
+!theme cerulean
+title 基于tmux学习的实现路线图
+
+state "当前状态 (错误架构)" as Current #Pink {
+    state "Surface拥有Terminal" as C1
+    state "SessionCore只有引用" as C2
+    state "attach不切换内容" as C3
+}
+
+state "Phase 4.1: SessionCore所有权转移" as P41 #Orange {
+    state "SessionCore.createOwnedTerminal()" as P41_1
+    state "SessionCore.createOwnedPTY()" as P41_2
+    state "SessionCore管理Shell进程" as P41_3
+    state "保持Surface兼容性" as P41_4
+    P41_1 --> P41_2
+    P41_2 --> P41_3
+    P41_3 --> P41_4
+}
+
+state "Phase 4.2: Surface查看器化" as P42 #Yellow {
+    state "Surface.session_core必选" as P42_1
+    state "移除Surface.io.terminal" as P42_2
+    state "Surface借用SessionCore.terminal" as P42_3
+    state "渲染器指向SessionCore" as P42_4
+    P42_1 --> P42_2
+    P42_2 --> P42_3
+    P42_3 --> P42_4
+}
+
+state "Phase 4.3: 简化attach" as P43 #LightBlue {
+    state "attachToSession(session_core)" as P43_1
+    state "surface.session_core = new_core" as P43_2
+    state "renderer.switchTerminal()" as P43_3
+    state "forceFullRedraw()" as P43_4
+    P43_1 --> P43_2
+    P43_2 --> P43_3
+    P43_3 --> P43_4
+}
+
+state "目标状态 (tmux模式)" as Target #LightGreen {
+    state "SessionCore拥有一切" as T1
+    state "Surface纯查看器" as T2
+    state "attach秒级完成" as T3
+    state "完整会话持久化" as T4
+}
+
+Current --> P41: 学习tmux架构
+P41 --> P42: 逐步重构
+P42 --> P43: 简化机制
+P43 --> Target: 达成目标
+
+note right of P41
+  **Phase 4.1 重点：**
+  
+  ```zig
+  // SessionCore真正拥有Terminal
+  pub const SessionCore = struct {
+      owned_terminal: Terminal,  // 不再是引用！
+      owned_pty: PTY,           // 不再是引用！
+      shell_pid: ProcessID,     // 管理shell进程
+      
+      pub fn createSession(cols, rows) !*SessionCore {
+          const terminal = try Terminal.init(cols, rows);
+          const pty = try PTY.spawn(shell);
+          // SessionCore拥有一切
+      }
+  };
+  ```
+end note
+
+note right of P42  
+  **Phase 4.2 重点：**
+  
+  ```zig
+  // Surface变成查看器
+  pub const Surface = struct {
+      session_core: *SessionCore,  // 必选，不再可选
+      // 移除: io: Termio
+      
+      pub fn terminal(self) *Terminal {
+          return self.session_core.terminal;
+      }
+      
+      pub fn keyCallback(key) {
+          self.session_core.writeInput(key);
+      }
+  };
+  ```
+end note
+
+note right of P43
+  **Phase 4.3 重点：**
+  
+  ```zig
+  // 简化的attach (学习tmux)
+  pub fn attachToSession(surface, session_core) {
+      surface.session_core = session_core;  // 指针切换
+      renderer.switchTerminal(session_core.terminal);
+      renderer.forceFullRedraw();  // 立即重绘
+      // 完成！就像tmux一样简单
+  }
+  ```
+end note
+
+note bottom
+  **实现策略：**
+  
+  1. **增量重构**：每个Phase都保持向后兼容
+  2. **特性开关**：用环境变量控制新架构启用
+  3. **充分测试**：每步都要验证功能正常
+  4. **学习tmux**：每个设计决策都参考tmux的做法
+  
+  **最终目标：**
+  让Ghostty的attach像tmux一样简单、快速、可靠
+end note
+
+@enduml

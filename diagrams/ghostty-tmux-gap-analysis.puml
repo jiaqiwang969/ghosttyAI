@@ -1,0 +1,143 @@
+@startuml ghostty-tmux-gap-analysis
+!theme cerulean
+title Ghostty vs tmux差距分析 - 为什么我们的attach失败
+
+package "tmux的正确架构" as tmux_correct {
+    class "tmux Server" as TmuxServer {
+        - sessions: RB_TREE(Session)
+        - clients: TAILQ(Client)
+        + session_find(name)
+        + server_client_set_session(client, session)
+    }
+    
+    class "Session (持久实体)" as TmuxSession {
+        - windows: winlinks
+        - curw: *winlink
+        - **拥有所有状态**
+        + session_attach(window)
+        + session_set_current(winlink)
+    }
+    
+    class "Client (临时查看器)" as TmuxClient {
+        - session: *Session ⬅️ 可切换
+        - tty: TTY
+        - **不拥有任何内容**
+        + 只负责渲染和输入
+    }
+    
+    TmuxServer *-- "n" TmuxSession: 管理
+    TmuxServer *-- "n" TmuxClient: 管理
+    TmuxClient --> TmuxSession: 查看 (可切换)
+}
+
+package "Ghostty的错误架构" as ghostty_wrong {
+    class "App" as GhosttyApp {
+        - surfaces: ArrayList(Surface)
+        - session_manager: SessionManager
+    }
+    
+    class "SessionCore (伪持久)" as GhosttyCore {
+        - terminal_ref: ?*anyopaque ⬅️ 只是引用！
+        - **不拥有任何内容**
+        + 只是指针管理器
+    }
+    
+    class "Surface (错误的拥有者)" as GhosttySurface {
+        - io: Termio ⬅️ 拥有Terminal
+        - session_core: ?*anyopaque
+        - **拥有所有内容但不持久**
+        + Surface关闭，一切销毁
+    }
+    
+    class "Termio" as GhosttyTermio {
+        - terminal: Terminal ⬅️ 真正的拥有者
+        - pty: PTY ⬅️ 真正的拥有者
+        - **内容在这里，但随Surface销毁**
+    }
+    
+    GhosttyApp *-- "n" GhosttySurface: 管理
+    GhosttyApp *-- GhosttyCore: 伪管理
+    GhosttySurface *-- GhosttyTermio: 拥有
+    GhosttyCore -.-> GhosttyTermio: 只是引用
+}
+
+note top of tmux_correct
+    **tmux的关键设计**
+    1. Session是独立的持久实体
+    2. Client只是临时的查看器
+    3. attach/detach只是指针切换
+    4. 所有状态由Session拥有
+end note
+
+note top of ghostty_wrong
+    **Ghostty的问题**
+    1. Surface拥有Terminal (应该相反)
+    2. SessionCore只有引用 (应该拥有)
+    3. 生命周期绑定错误
+    4. 无法实现真正的detach
+end note
+
+note bottom
+    **关键差距分析**
+    
+    **所有权问题**
+    ❌ SessionCore不拥有Terminal
+    ❌ Terminal属于Surface
+    ❌ Surface关闭，Terminal销毁
+    ✅ tmux: Session拥有一切
+    
+    **生命周期问题**
+    ❌ Surface = 窗口 = 会话
+    ❌ 窗口关闭，会话消失
+    ✅ tmux: Session独立于Client
+    
+    **切换机制问题**
+    ❌ 需要复杂的Terminal切换
+    ❌ 需要状态传输和同步
+    ✅ tmux: 只需更新指针
+    
+    **为什么Ghostty的attach不工作？**
+    
+    1. **架构颠倒**：
+       • Surface (临时) 拥有 Terminal (应该持久)
+       • SessionCore (应该持久) 只有引用 (临时)
+       
+    2. **生命周期绑定错误**：
+       • Terminal生命周期 = Surface生命周期
+       • Session生命周期 = Surface生命周期
+       • 无法实现真正的"detached session"
+       
+    3. **切换复杂化**：
+       • 需要在运行时转移Terminal所有权
+       • 需要复杂的状态同步机制
+       • 而tmux只需要更新一个指针
+       
+    4. **当前attach的假象**：
+       • 更新了SessionCore.terminal_ref
+       • 但Surface.io.terminal没变
+       • 渲染器还是显示原来的Terminal
+       • 就像换了电视遥控器但电视还播原频道
+    
+    **正确的修复方向**
+    
+    **架构重构 (必需)**
+    • SessionCore拥有Terminal和PTY
+    • Surface变成查看器
+    • attach只更新Surface.session_core
+    
+    **实现步骤**
+    1. SessionCore创建和拥有Terminal
+    2. Surface借用SessionCore的Terminal
+    3. attach时切换借用目标
+    4. 渲染器重绘新Terminal内容
+    
+    **学习tmux的精髓：**
+    1. Session是王者，拥有一切
+    2. Client是仆人，只负责查看
+    3. attach是指针切换，不是内容切换
+    4. 简单、快速、可靠
+end note
+
+tmux_correct -[hidden]down-> ghostty_wrong
+
+@enduml

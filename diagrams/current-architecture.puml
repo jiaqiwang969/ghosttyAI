@@ -1,0 +1,110 @@
+@startuml current-architecture
+!theme cerulean
+title Ghostty当前架构 - Surface拥有一切 (❌ 错误模式)
+
+package "App Layer" {
+    class App {
+        - surfaces: ArrayList(Surface)
+        - session_manager: SessionManager
+        + createSurface()
+        + mailbox: Mailbox
+    }
+    
+    class SessionManager {
+        - sessions: HashMap(name->Surface*)
+        + registerSession(name, surface_ptr)
+        + getSession(name): Surface*
+        + sendMessage(from, to, data)
+    }
+}
+
+package "Surface Layer (每个窗口/标签)" {
+    class Surface {
+        - io: Termio
+        - renderer_state: RendererState
+        - config: Config
+        - font: Font
+        - session_id: String
+        + init(config)
+        + keyCallback(key)
+        + render()
+        + processReceivedMessage(msg)
+    }
+    
+    class RendererState {
+        - terminal: *Terminal
+        - mutex: Mutex
+        + lock()
+        + unlock()
+    }
+}
+
+package "I/O Layer" {
+    class Termio {
+        - terminal: Terminal
+        - pty: PTY
+        - parser: Parser
+        - thread_pool: ThreadPool
+        - io_thread: Thread
+        + init(config)
+        + write(data)
+        - ioThreadFn()
+    }
+    
+    class Terminal {
+        - screen: Screen
+        - scrollback: Scrollback
+        - cursor: Cursor
+        - alternate_screen: Screen
+        + write(data)
+        + read(): String
+        + getSnapshot(): Snapshot
+    }
+    
+    class PTY {
+        - fd: FileDescriptor
+        - child_pid: ProcessID
+        + spawn(shell)
+        + read(): bytes
+        + write(bytes)
+    }
+}
+
+' 关系
+App *-- "n" Surface: owns
+App *-- SessionManager: owns
+SessionManager o-- Surface: "references\n(by pointer)"
+
+Surface *-- Termio: owns
+Surface *-- RendererState: owns
+RendererState --> Terminal: "points to\nio.terminal"
+
+Termio *-- Terminal: owns
+Termio *-- PTY: owns
+Termio *-- Parser: owns
+
+PTY --> "Shell Process": spawns
+
+note right of Surface
+  **❌ 错误的架构模式：**
+  - 每个Surface完全独立
+  - 拥有自己的Terminal (应该属于Session)
+  - 拥有自己的PTY (应该属于Session)
+  - 拥有自己的Shell进程 (应该属于Session)
+  
+  **导致的问题：**
+  - 无法真正共享Terminal状态
+  - attach只能看到新输出
+  - Surface关闭，一切都销毁
+  - 违背了tmux的持久化原则
+end note
+
+note bottom of SessionManager
+  **当前SessionManager的局限：**
+  - 只管理名称映射
+  - 不管理实际的Terminal状态
+  - 不像tmux的Session那样拥有内容
+  - 需要重构为真正的Session管理器
+end note
+
+@enduml

@@ -1,0 +1,87 @@
+@startuml new-attach-dataflow
+!theme cerulean
+title 新架构的attach数据流 - 学习tmux的简洁性
+
+actor User
+participant "Surface A\n(查看器)" as SA
+participant "App" as App
+participant "SessionManager" as SM
+participant "SessionCore A\n(持久会话)" as SCA
+participant "SessionCore B\n(持久会话)" as SCB
+participant "Terminal A\n(SCA拥有)" as TA
+participant "Terminal B\n(SCB拥有)" as TB
+participant "PTY A\n(SCA拥有)" as PA
+participant "PTY B\n(SCB拥有)" as PB
+
+== 初始状态: Surface A 查看 SessionCore A ==
+
+SA -> SCA: surface.session_core = SCA
+SA -> TA: renderer显示Terminal A内容
+TA -> PA: Terminal A连接PTY A
+note over PA: Shell A进程持续运行
+
+== SessionCore B 在后台持续运行 ==
+
+SCB -> TB: SessionCore B拥有Terminal B
+TB -> PB: Terminal B连接PTY B  
+note over PB: Shell B进程持续运行\n即使没有Surface查看
+
+== User 执行: @ghostty attach session-b ==
+
+User -> SA: @ghostty attach session-b
+SA -> App: mailbox.push(attach_session)
+App -> SM: attachSurfaceToSession(SA, "session-b")
+
+group tmux风格的简单切换
+    SM -> SCB: 找到SessionCore B
+    SM -> SA: **surface.session_core = SCB** ⬅️ 关键切换
+    note right: 就像tmux的client.session = new_session
+    
+    SA -> TB: **renderer_state.terminal = SCB.terminal** ⬅️ 更新渲染目标
+    note right: 就像tmux的tty指向新session的screen
+    
+    SA -> SA: **renderer.forceFullRedraw()** ⬅️ 立即重绘
+    note right: 就像tmux的tty_redraw_region()
+end
+
+== 结果: Surface A 现在查看 SessionCore B ==
+
+SA -> SCB: surface.session_core = SCB
+SA -> TB: renderer显示Terminal B内容
+note over SA: 立即看到Terminal B的\n完整历史和当前状态
+
+User -> SA: 键盘输入
+SA -> SCB: 转发输入
+SCB -> TB: 写入Terminal B
+TB -> PB: 输出到PTY B
+PB -> TB: 读取shell输出
+TB -> SA: 通知内容更新
+SA -> User: 显示新内容
+
+note over SCA, SCB
+  **关键洞察：**
+  两个SessionCore都持续运行
+  Terminal A和B的内容都完整保存
+  attach只是让Surface切换查看目标
+  就像tmux一样简单！
+end note
+
+== 对比：当前错误架构的问题 ==
+
+note left of SA
+  **当前架构的问题：**
+  
+  ❌ Surface拥有Terminal
+  ❌ SessionCore只有引用
+  ❌ attach需要"切换Terminal"
+  ❌ 复杂的状态同步
+  
+  **新架构的优势：**
+  
+  ✅ SessionCore拥有Terminal
+  ✅ Surface只是查看器
+  ✅ attach只需切换指针
+  ✅ 简单如tmux
+end note
+
+@enduml

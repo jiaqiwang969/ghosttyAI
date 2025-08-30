@@ -1,0 +1,128 @@
+@startuml tmux-attach-architecture
+!theme cerulean
+title tmux的Attach架构精髓 - 真正的会话持久化
+
+package "tmux Server (持久进程)" {
+    class Session {
+        - id: u_int
+        - name: char*
+        - creation_time: timeval
+        - last_attached_time: timeval
+        - curw: *winlink (当前窗口)
+        - windows: winlinks (所有窗口)
+        - attached: u_int (客户端计数)
+        - references: int
+        + session_attach(window, idx)
+        + session_detach(winlink)
+        + session_set_current(winlink)
+    }
+    
+    class Window {
+        - id: u_int
+        - name: char*
+        - panes: window_panes
+        - active: *window_pane
+        - latest: *client (最后操作的客户端)
+        + window_set_active_pane(pane)
+        + window_update_focus()
+    }
+    
+    class WindowPane {
+        - id: u_int
+        - fd: int (PTY文件描述符)
+        - pid: pid_t (shell进程)
+        - screen: *screen (终端内容)
+        - saved_grid: *grid (保存的内容)
+        + window_pane_spawn()
+        + window_pane_resize()
+    }
+    
+    class Screen {
+        - grid: *grid (屏幕内容)
+        - history: *grid (滚动历史)
+        - cx, cy: u_int (光标位置)
+        - mode: int (屏幕模式)
+        + screen_write()
+        + screen_redraw()
+    }
+}
+
+package "tmux Client (临时进程)" {
+    class Client {
+        - session: *session (当前会话)
+        - last_session: *session (上次会话)
+        - tty: tty (终端接口)
+        - fd: int (客户端连接)
+        - flags: int (状态标志)
+        + server_client_set_session(session)
+    }
+    
+    class TTY {
+        - client: *client
+        - term: char* (终端类型)
+        - fd: int (TTY文件描述符)
+        + tty_redraw_region()
+        + tty_update_mode()
+        + tty_reset()
+    }
+}
+
+package "全局状态管理" {
+    class Sessions {
+        <<singleton>>
+        - sessions: RB_TREE(session)
+        + session_find(name)
+        + session_create(name, cwd, shell)
+        + session_destroy(session)
+    }
+    
+    class Clients {
+        <<singleton>>
+        - clients: TAILQ(client)
+        + server_client_create()
+        + server_client_lost()
+    }
+}
+
+' 关系
+Session *-- "n" Window: owns via winlinks
+Window *-- "n" WindowPane: contains
+WindowPane *-- Screen: displays
+Screen *-- "grid+history": persistent content
+
+Client --> Session: c.session (可切换)
+Client *-- TTY: owns
+TTY --> Screen: renders from session
+
+Sessions --> "n" Session: manages globally
+Clients --> "n" Client: manages globally
+
+' tmux attach 的关键流程
+note right of Session
+  **tmux的核心洞察：**
+  1. Session是独立的持久实体
+  2. 拥有完整的Window/Pane/Screen状态
+  3. Client只是"查看器"，可随时切换
+  4. PTY和Shell进程属于WindowPane
+  5. Screen内容完全保存在Session中
+end note
+
+note right of Client
+  **Client的角色：**
+  1. 临时的"终端查看器"
+  2. 通过server_client_set_session()切换
+  3. TTY只负责渲染当前Session的内容
+  4. 可以随时detach/attach到不同Session
+end note
+
+note bottom
+  **tmux attach的魔法：**
+  1. Session永远存在（即使没有Client）
+  2. WindowPane的PTY和Shell持续运行
+  3. Screen内容完整保存在Session中
+  4. attach只是让Client.session指向目标Session
+  5. TTY立即重绘目标Session的Screen内容
+  6. 所有状态（历史、光标、模式）都完整恢复
+end note
+
+@enduml

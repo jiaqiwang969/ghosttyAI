@@ -1,4 +1,5 @@
 # Dependencies
+.tree/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
