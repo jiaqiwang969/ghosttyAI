@@ -874,7 +874,7 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             _ = try self.rt_app.performAction(
                 .{ .surface = self },
                 .render,
-                .{},
+                {},
             );
         },
 
