@@ -699,7 +699,10 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
     // If broadcasting is enabled for this session, send a lightweight
     // broadcast request to the app thread so it can wake all viewers.
     if (self.broadcast_session_id != null) {
-        _ = self.surface_mailbox.push(.{ .broadcast_redraw = {} }, .{ .instant = {} });
+        // 改为交给会话级分发器（通过 App 邮箱处理 redraw_session）
+        _ = self.surface_mailbox.app.push(.{
+            .redraw_session = .{ .session = self.broadcast_session_id.? },
+        }, .{ .instant = {} });
     }
 
     // Whenever a character is typed, we ensure the cursor is in the

@@ -28,6 +28,7 @@ const process = std.process;
 const SurfaceList = std.ArrayListUnmanaged(*apprt.Surface);
 const SessionManager = @import("terminal/SessionManager.zig");
 const SessionCore = @import("terminal/SessionCore.zig").SessionCore;
+const SessionRedrawDispatcher = @import("terminal/SessionRedrawDispatcher.zig");
 
 /// General purpose allocator
 alloc: Allocator,
@@ -81,6 +82,9 @@ first: bool = true,
 /// Session manager for terminal-to-terminal communication
 session_manager: SessionManager,
 
+/// 会话级重绘分发器（xev Loop + Async + Timer 合并）
+redraw_dispatcher: ?*SessionRedrawDispatcher = null,
+
 pub const CreateError = Allocator.Error || font.SharedGridSet.InitError;
 
 /// Create a new app instance. This returns a stable pointer to the app
@@ -112,10 +116,16 @@ pub fn init(
         .font_grid_set = font_grid_set,
         .config_conditional_state = .{},
         .session_manager = SessionManager.init(alloc),
+        .redraw_dispatcher = null,
     };
 }
 
 pub fn deinit(self: *App) void {
+    if (self.redraw_dispatcher) |d| {
+        d.stop();
+        d.deinit();
+        self.redraw_dispatcher = null;
+    }
     // Clean up all our surfaces
     for (self.surfaces.items) |surface| surface.deinit();
     self.surfaces.deinit(self.alloc);
@@ -278,17 +288,13 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             .open_config => try self.performAction(rt_app, .open_config),
             .new_window => |msg| try self.newWindow(rt_app, msg),
             .close => |surface| self.closeSurface(surface),
-            .surface_message => |msg| blk: {
-                // Intercept broadcast_redraw to perform App-level multi-viewer redraw
-                switch (msg.message) {
-                    .broadcast_redraw => {
-                        self.broadcastRedrawForSurface(rt_app, msg.surface) catch |err| {
-                            log.warn("broadcastRedrawForSurface failed: {}", .{err});
-                        };
-                        break :blk;
-                    },
-                    else => try self.surfaceMessage(msg.surface, msg.message),
-                }
+            .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
+            .redraw_session => |rs| {
+                // rs.session 是 dispatcher 分配的字符串，使用后释放
+                self.broadcastRedrawForSession(rt_app, rs.session) catch |err| {
+                    log.warn("broadcastRedrawForSession failed: {}", .{err});
+                };
+                if (self.redraw_dispatcher) |d| d.freeSessionId(rs.session);
             },
             .redraw_surface => |surface| try self.redrawSurface(rt_app, surface),
             .redraw_inspector => |surface| self.redrawInspector(rt_app, surface),
@@ -790,6 +796,25 @@ fn broadcastRedrawForSurface(self: *App, rt_app: *apprt.App, surface: *Surface) 
     }
 }
 
+fn broadcastRedrawForSession(self: *App, rt_app: *apprt.App, session_name: []const u8) !void {
+    const viewers = self.session_manager.copyViewers(session_name, self.alloc) catch return;
+    defer self.alloc.free(viewers);
+
+    // Focus-first
+    if (self.focused_surface) |fs| {
+        if (self.hasSurface(fs)) {
+            _ = try rt_app.performAction(.{ .surface = fs }, .render, {});
+        }
+    }
+    // Others
+    for (viewers) |vp| {
+        const v = @as(*Surface, @ptrCast(@alignCast(vp)));
+        if (!self.hasSurface(v)) continue;
+        if (self.focused_surface) |fs| if (v == fs) continue;
+        _ = try rt_app.performAction(.{ .surface = v }, .render, {});
+    }
+}
+
 /// Handle a window message
 fn surfaceMessage(self: *App, surface: *Surface, msg: apprt.surface.Message) !void {
     // We want to ensure our window is still active. Window messages
@@ -849,6 +874,9 @@ pub const Message = union(enum) {
     /// Redraw the inspector. This is called whenever some non-OS event
     /// causes the inspector to need to be redrawn.
     redraw_inspector: *apprt.Surface,
+
+    /// Redraw all viewers of a session (dispatched by SessionRedrawDispatcher)
+    redraw_session: struct { session: []const u8 },
 
     /// Send a command to another terminal session
     send_to_session: struct {
