@@ -56,6 +56,9 @@ renderer_mailbox: *renderer.Thread.Mailbox,
 /// The mailbox for communicating with the surface.
 surface_mailbox: apprt.surface.Mailbox,
 
+/// Optional session id for broadcasting redraws to all viewers.
+broadcast_session_id: ?[]const u8 = null,
+
 /// The cached size info
 size: renderer.Size,
 
@@ -69,6 +72,9 @@ terminal_stream: terminalpkg.Stream(StreamHandler),
 /// Last time the cursor was reset. This is used to prevent message
 /// flooding with cursor resets.
 last_cursor_reset: ?std.time.Instant = null,
+
+/// Optional session id for app-level redraw broadcasting.
+broadcast_session_id: ?[]const u8 = null,
 
 /// State we have for thread enter. This may be null if we don't need
 /// to keep track of any state or if its already been freed.
@@ -691,6 +697,21 @@ pub fn processOutput(self: *Termio, buf: []const u8) void {
 fn processOutputLocked(self: *Termio, buf: []const u8) void {
     // Schedule a render. We can call this first because we have the lock.
     self.terminal_stream.handler.queueRender() catch unreachable;
+
+    // If we are running under SessionCore with broadcasting enabled,
+    // notify all viewers (via app thread) to redraw. We cannot directly
+    // access App here; piggyback a lightweight surface message that
+    // triggers a redraw on this surface (viewer will be woken by app).
+    if (self.broadcast_session_id) |_| {
+        // Wake our renderer mailbox quickly as a hint (already done),
+        // then send a no-op that ensures app thread wakes surface.
+        // We use an existing benign message: color_change of current fg.
+        const rgb = self.terminal.default_palette[7]; // white-ish
+        _ = self.surface_mailbox.push(.{ .color_change = .{
+            .kind = @import("../terminal/osc/Command.zig").ColorOperation.Kind.set,
+            .color = rgb,
+        } }, .{ .instant = {} });
+    }
 
     // Whenever a character is typed, we ensure the cursor is in the
     // non-blink state so it is rendered if visible. If we're under

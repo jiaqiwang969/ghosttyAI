@@ -151,6 +151,7 @@ pub fn spawnPtyShell(
         .renderer_wakeup = self.renderer_wakeup_core.?,
         .renderer_mailbox = self.renderer_mailbox_core.?,
         .surface_mailbox = surface_mailbox,
+        .broadcast_session_id = self.id,
     });
 
     // 让查看器指向 Termio 内部终端（由 IO 驱动）

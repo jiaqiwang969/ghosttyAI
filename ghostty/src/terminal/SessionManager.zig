@@ -235,6 +235,22 @@ pub fn getViewerCount(self: *SessionManager, id: []const u8) usize {
     return 0;
 }
 
+/// 复制并返回指定会话的 viewer 列表（调用方负责释放返回的切片）
+pub fn copyViewers(
+    self: *SessionManager,
+    id: []const u8,
+    alloc: Allocator,
+) ![]*anyopaque {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    const list_opt = self.viewers.get(id) orelse return &[_]*anyopaque{};
+    if (list_opt.items.len == 0) return &[_]*anyopaque{};
+    var out = try alloc.alloc(*anyopaque, list_opt.items.len);
+    @memcpy(out, list_opt.items);
+    return out;
+}
+
 /// 获取/创建 SessionCore
 pub fn getOrCreateCore(self: *SessionManager, id: []const u8) !*SessionCore {
     self.mutex.lock();

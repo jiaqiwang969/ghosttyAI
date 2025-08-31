@@ -41,3 +41,8 @@ renderer_mailbox: *renderer.Thread.Mailbox,
 
 /// The mailbox for sending the surface messages.
 surface_mailbox: apprt.surface.Mailbox,
+
+/// Optional session identifier used for app-level redraw broadcasting.
+/// When present, the IO handler may notify the App to redraw all viewers
+/// attached to this session (B-strategy multi-viewer refresh).
+broadcast_session_id: ?[]const u8 = null,
