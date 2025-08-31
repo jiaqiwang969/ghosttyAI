@@ -161,7 +161,7 @@ pub fn tick(self: *App, rt_app: *apprt.App) !void {
 
     // Lazy-init dispatcher once rt_app is available and we have a mailbox
     if (self.redraw_dispatcher == null) {
-        var mb: Mailbox = .{ .rt_app = rt_app, .mailbox = &self.mailbox };
+        const mb: Mailbox = .{ .rt_app = rt_app, .mailbox = &self.mailbox };
         self.dispatcher_mailbox = mb;
         const d = try SessionRedrawDispatcher.init(self.alloc, &self.dispatcher_mailbox.?, 8 * std.time.ns_per_ms);
         try d.start();
