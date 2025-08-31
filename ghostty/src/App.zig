@@ -773,25 +773,19 @@ fn broadcastRedrawForSurface(self: *App, rt_app: *apprt.App, surface: *Surface) 
         return;
     }
 
-    // Focus-first: redraw focused viewer first if it is in the list
-    if (self.focused_surface) |fs| {
-        var i: usize = 0;
-        while (i < viewers.len) : (i += 1) {
-            if (viewers[i] == fs) {
-                if (self.hasSurface(fs)) {
-                    _ = try rt_app.performAction(.{ .surface = fs }, .render, {});
-                }
-                // Remove from list by swapping with last
-                viewers[i] = viewers[viewers.len - 1];
-                break;
-            }
+    // Focus-first: redraw focused viewer first
+    const fs_opt = self.focused_surface;
+    if (fs_opt) |fs| {
+        if (self.hasSurface(fs)) {
+            _ = try rt_app.performAction(.{ .surface = fs }, .render, {});
         }
     }
 
-    // Redraw remaining viewers
+    // Redraw remaining viewers (skip focused surface if present)
     for (viewers) |vp| {
         const v = @as(*Surface, @ptrCast(@alignCast(vp)));
         if (!self.hasSurface(v)) continue;
+        if (fs_opt) |fs| if (v == fs) continue;
         _ = try rt_app.performAction(.{ .surface = v }, .render, {});
     }
 }
