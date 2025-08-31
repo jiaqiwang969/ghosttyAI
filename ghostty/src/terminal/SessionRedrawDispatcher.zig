@@ -85,6 +85,7 @@ pub fn stop(self: *Dispatcher) void {
 pub fn post(self: *Dispatcher, session_id: []const u8) !void {
     // 复制 key 存入 pending（集合）
     if (!self.pending.contains(session_id)) {
+        // 存入一份拷贝，稍后 App 处理并释放
         try self.pending.put(try self.alloc.dupe(u8, session_id), {});
     }
     // 唤醒以安排/重臂定时器
@@ -129,20 +130,20 @@ fn timerCallback(
 
     // 取出所有待处理的 session，向 App 投递 redraw_session 消息
     var it = self.pending.iterator();
+    var to_remove: usize = 0;
     while (it.next()) |entry| {
         const sid = entry.key_ptr.*; // owned by pending map
-        _ = self.app_mailbox.push(.{ .redraw_session = .{ .session = sid } }, .{ .instant = {} });
+        _ = self.app_mailbox.push(.{ .redraw_session = .{ .session = sid, .own = true } }, .{ .instant = {} });
+        to_remove += 1;
     }
-    // 清空 map（App 处理后负责释放字符串）
-    // 注意：此处不 free key，由 App 在处理消息时 free
-    self.pending.clearRetainingCapacity();
+    // 移除已投递的键（避免二次释放）
+    if (to_remove > 0) {
+        self.pending.clearRetainingCapacity();
+    }
 
     return .disarm;
 }
 
-pub fn freeSessionId(self: *Dispatcher, sid: []const u8) void {
-    // 提供给 App 在处理完成后释放我们分配的字符串
-    self.alloc.free(sid);
-}
+// App 不再直接调用 free；由 own 标志决定释放职责
 
 

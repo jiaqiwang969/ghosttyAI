@@ -701,7 +701,7 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
     if (self.broadcast_session_id != null) {
         // 改为交给会话级分发器（通过 App 邮箱处理 redraw_session）
         _ = self.surface_mailbox.app.push(.{
-            .redraw_session = .{ .session = self.broadcast_session_id.? },
+            .redraw_session = .{ .session = self.broadcast_session_id.?, .own = false },
         }, .{ .instant = {} });
     }
 

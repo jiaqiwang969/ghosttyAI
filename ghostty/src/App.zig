@@ -302,11 +302,10 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             .close => |surface| self.closeSurface(surface),
             .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
             .redraw_session => |rs| {
-                // rs.session 是 dispatcher 分配的字符串，使用后释放
                 self.broadcastRedrawForSession(rt_app, rs.session) catch |err| {
                     log.warn("broadcastRedrawForSession failed: {}", .{err});
                 };
-                if (self.redraw_dispatcher) |d| d.freeSessionId(rs.session);
+                if (rs.own) self.alloc.free(rs.session);
             },
             .redraw_surface => |surface| try self.redrawSurface(rt_app, surface),
             .redraw_inspector => |surface| self.redrawInspector(rt_app, surface),
@@ -888,7 +887,8 @@ pub const Message = union(enum) {
     redraw_inspector: *apprt.Surface,
 
     /// Redraw all viewers of a session (dispatched by SessionRedrawDispatcher)
-    redraw_session: struct { session: []const u8 },
+    /// own 为 true 时，App 处理后应释放 session 字符串；为 false 则不释放
+    redraw_session: struct { session: []const u8, own: bool = false },
 
     /// Send a command to another terminal session
     send_to_session: struct {
