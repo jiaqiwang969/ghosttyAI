@@ -869,6 +869,14 @@ pub fn needsConfirmQuit(self: *Surface) bool {
 pub fn handleMessage(self: *Surface, msg: Message) !void {
     switch (msg) {
         .change_config => |config| try self.updateConfig(config),
+        .broadcast_redraw => {
+            // Forward to app thread to redraw this surface now
+            _ = try self.rt_app.performAction(
+                .{ .surface = self },
+                .render,
+                .{},
+            );
+        },
 
         .set_title => |*v| {
             // We ignore the message in case the title was set via config.

@@ -99,6 +99,10 @@ pub const Message = union(enum) {
     /// Report the progress of an action using a GUI element
     progress_report: terminal.osc.Command.ProgressReport,
 
+    /// Request the app to broadcast redraw to all viewers of the session
+    /// that this surface is currently attached to.
+    broadcast_redraw: void,
+
     pub const ReportTitleStyle = enum {
         csi_21_t,
 

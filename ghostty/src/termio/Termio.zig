@@ -696,7 +696,11 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
     // Schedule a render. We can call this first because we have the lock.
     self.terminal_stream.handler.queueRender() catch unreachable;
 
-    // Note: viewer broadcast redraw will be implemented at App level (B strategy).
+    // If broadcasting is enabled for this session, send a lightweight
+    // broadcast request to the app thread so it can wake all viewers.
+    if (self.broadcast_session_id != null) {
+        _ = self.surface_mailbox.push(.{ .broadcast_redraw = {} }, .{ .instant = {} });
+    }
 
     // Whenever a character is typed, we ensure the cursor is in the
     // non-blink state so it is rendered if visible. If we're under
