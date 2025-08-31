@@ -2382,6 +2382,14 @@ pub fn keyCallback(
                                 t.linefeed() catch {};
                             }
                         }
+                    } else if (std.mem.startsWith(u8, subcmd, "core-pty-start")) {
+                        // @ghostty core-pty-start [session]
+                        const rest = std.mem.trim(u8, subcmd[14..], " ");
+                        const target = if (rest.len == 0) null else rest;
+                        _ = self.app.mailbox.push(.{ .core_pty_start = .{
+                            .from_surface = self,
+                            .target = if (target) |t| try self.alloc.dupe(u8, t) else null,
+                        } }, .{ .ns = 100_000_000 });
                     } else if (std.mem.startsWith(u8, subcmd, "attach ")) {
                         // @ghostty attach <session-id>  ->  同时切换渲染与输入
                         const args = std.mem.trim(u8, subcmd[7..], " ");
@@ -2562,6 +2570,41 @@ pub fn keyCallback(
             return .closed;
         }
 
+        // 如果启用了 IO 转发，则将输入写入目标会话（Core 优先，其次目标 Surface）
+        if (self.io_attach_target) |target_name| io_forward: {
+            errdefer write_req.deinit();
+            // 尝试 Core
+            const core = self.app.session_manager.getOrCreateCore(target_name) catch {
+                break :io_forward;
+            };
+            if (core.io) |io_ptr| {
+                io_ptr.queueMessage(switch (write_req) {
+                    .small => |v| .{ .write_small = v },
+                    .stable => |v| .{ .write_stable = v },
+                    .alloc => |v| .{ .write_alloc = v },
+                }, .unlocked);
+                // 远端已写入，本地不再写入
+                // 后续渲染唤醒由远端负责
+                // 注意：不要在此处 deinit write_req，所有权已移交
+                // 返回已消费
+                return .consumed;
+            }
+
+            // 回退：若 Core 尚未拥有 IO，尝试找到目标 Surface
+            if (self.app.session_manager.getSurfaceById(target_name)) |ptr_any| {
+                const target_surface = @as(*@This(), @ptrCast(@alignCast(ptr_any)));
+                target_surface.io.queueMessage(switch (write_req) {
+                    .small => |v| .{ .write_small = v },
+                    .stable => |v| .{ .write_stable = v },
+                    .alloc => |v| .{ .write_alloc = v },
+                }, .unlocked);
+                return .consumed;
+            }
+
+            // 两个通道都不可用，退出转发，落回本地写入（以避免丢键）
+        }
+
+        // 默认：写入本地 PTY
         errdefer write_req.deinit();
         self.io.queueMessage(switch (write_req) {
             .small => |v| .{ .write_small = v },

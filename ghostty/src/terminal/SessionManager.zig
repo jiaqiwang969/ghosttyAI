@@ -17,7 +17,7 @@ const ViewerPointerMap = std.AutoHashMap(usize, []const u8); // viewer surface p
 /// 会话信息
 const SessionInfo = struct {
     id: SessionId,  // User-friendly name like "main", "dev", etc.
-    surface_ptr: *anyopaque,  // 实际是 *Surface，这里用anyopaque避免循环依赖
+    surface_ptr: ?*anyopaque,  // 实际是 *Surface，这里用anyopaque避免循环依赖；允许无窗口
     created_time: i64,
     is_remote: bool = false,
     auto_generated: bool = false,  // Whether this name was auto-generated
@@ -161,6 +161,11 @@ pub fn registerSession(
         var core = try SessionCore.init(self.allocator, id, 80, 24);
         errdefer core.deinit(self.allocator);
         try self.cores.put(try self.allocator.dupe(u8, id), core);
+        // 完全模式：在 Core 内部启动 PTY+shell 并接管终端
+        const Surface = @import("../Surface.zig");
+        const s = @as(*Surface, @ptrCast(@alignCast(surface_ptr)));
+        // 采用现有 Surface 的终端作为 Core 的查看源，避免重复 IO 线程
+        core.adoptExistingTerminal(&s.io.terminal);
     }
     
     std.log.info("Registered session: {s} (remote: {any})", .{ 
@@ -184,11 +189,17 @@ pub fn unregisterSession(self: *SessionManager, id: []const u8) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     
-    if (self.sessions.fetchRemove(id)) |entry| {
-        // Remove from pointer map
-        _ = self.pointer_map.remove(@intFromPtr(entry.value.surface_ptr));
-        
-        // 删除相关的链接
+    if (self.sessions.getPtr(id)) |info_ptr_ptr| {
+        const info_ptr = info_ptr_ptr.*; // *SessionInfo
+        // Remove from pointer map if we had a surface
+        if (info_ptr.surface_ptr) |sp| {
+            _ = self.pointer_map.fetchRemove(@intFromPtr(sp));
+        }
+
+        // Mark session as headless; keep SessionInfo so Core persists
+        info_ptr.surface_ptr = null;
+
+        // 删除相关的链接（可选：保留，暂不删除）
         var i: usize = 0;
         while (i < self.links.items.len) {
             const link = self.links.items[i];
@@ -201,10 +212,6 @@ pub fn unregisterSession(self: *SessionManager, id: []const u8) void {
                 i += 1;
             }
         }
-        
-        self.allocator.free(entry.key);
-        self.allocator.destroy(entry.value);
-        
         std.log.info("Unregistered session: {s}", .{id});
     }
 }
@@ -215,9 +222,17 @@ pub fn getSurfaceById(self: *SessionManager, id: []const u8) ?*anyopaque {
     defer self.mutex.unlock();
 
     if (self.sessions.get(id)) |info| {
-        return info.surface_ptr;
+        return info.surface_ptr orelse null;
     }
     return null;
+}
+
+/// 返回某个会话当前被多少个查看器附着（用于诊断）
+pub fn getViewerCount(self: *SessionManager, id: []const u8) usize {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    if (self.viewers.get(id)) |list| return list.items.len;
+    return 0;
 }
 
 /// 获取/创建 SessionCore
@@ -235,6 +250,17 @@ pub fn getOrCreateCore(self: *SessionManager, id: []const u8) !*SessionCore {
 pub fn getCoreTerminalForViewing(self: *SessionManager, id: []const u8) ?*(@TypeOf(SessionCore.init).ReturnType) {
     _ = self; _ = id; // 暂不暴露具体类型指针，后续按需完善
     return null;
+}
+
+fn envFlagEnabled(name: []const u8) bool {
+    const process = std.process;
+    var gpa = std.heap.page_allocator;
+    const val = process.getEnvVarOwned(gpa, name) catch return false;
+    defer gpa.free(val);
+    return std.mem.eql(u8, val, "1")
+        or std.ascii.eqlIgnoreCase(val, "true")
+        or std.ascii.eqlIgnoreCase(val, "yes")
+        or std.ascii.eqlIgnoreCase(val, "on");
 }
 
 /// 将某个查看器附着到指定会话（仅登记关系，不做渲染/IO）

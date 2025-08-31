@@ -317,6 +317,11 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
                     log.warn("Failed to detach-io: {}", .{err});
                 };
             },
+            .core_pty_start => |msg| {
+                self.corePtyStart(msg.from_surface, msg.target) catch |err| {
+                    log.warn("Failed to core-pty-start: {}", .{err});
+                };
+            },
 
             // If we're quitting, then we set the quit flag and stop
             // draining the mailbox immediately. This lets us defer
@@ -393,15 +398,13 @@ pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
 
 /// 在当前 surface 上将渲染目标切换为目标会话对应 Surface 的 terminal 指针
 pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
-    // 可选特性：通过 SessionCore 获取 Terminal（默认关闭）
+    // 默认使用 SessionCore 渲染；若不可用则回退到 Surface 终端
     var used_core_path = false;
-    if (envFlagEnabled("GHOSTTY_USE_SESSIONCORE_RENDER")) core_path: {
+    core_path: {
         const core = self.session_manager.getOrCreateCore(target_name) catch |err| {
-            log.warn("attach-render core path disabled due to error: {}", .{err});
+            log.warn("attach-render core path error: {} (fallback)", .{err});
             break :core_path;
         };
-        // 仅当 SessionCore 已接管 IO（例如 has_pty=true）时才走 core 路径；
-        // 否则回退到 surface 路径以保持可见更新。
         if (!core.has_pty) break :core_path;
         from.renderer_state.mutex.lock();
         from.renderer_state.terminal = core.getTerminalForViewing();
@@ -409,16 +412,17 @@ pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
         from.renderer_state.mutex.unlock();
         used_core_path = true;
         log.info("attach-render via SessionCore for {s}", .{target_name});
+
+        // 同步输入目标，实现统一的 attach（渲染+输入）
+        if (from.io_attach_target) |old| from.alloc.free(old);
+        from.io_attach_target = try from.alloc.dupe(u8, target_name);
     }
 
     if (!used_core_path) {
-        // 定位目标 Surface（渲染直接查看对方的 Terminal，保证与输入转发一致）
         const ptr_any = self.session_manager.getSurfaceById(target_name) orelse return error.SessionNotFound;
         const target_surface = @as(*Surface, @ptrCast(@alignCast(ptr_any)));
-
         from.renderer_state.mutex.lock();
         from.renderer_state.terminal = &target_surface.io.terminal;
-        // 标记全量重绘
         from.renderer_state.terminal.flags.dirty.clear = true;
         from.renderer_state.mutex.unlock();
         log.info("attach-render via Surface terminal for {s}", .{target_name});
@@ -516,6 +520,34 @@ pub fn detachIO(self: *App, from: *Surface) !void {
     t.printString("[ghostty] detach-io -> local") catch {};
     t.linefeed() catch {};
     from.renderer_state.mutex.unlock();
+    try from.queueRender();
+}
+
+/// 启动 SessionCore 的 PTY 并将渲染绑定到 core 终端
+pub fn corePtyStart(self: *App, from: *Surface, target_opt: ?[]const u8) !void {
+    const target_name = target_opt orelse (self.getSessionName(from) orelse return error.SessionNotFound);
+    const core = try self.session_manager.getOrCreateCore(target_name);
+    // 尝试启动（如果已存在则直接返回）
+    var cfg = try @import("config.zig").Config.default(self.alloc);
+    defer cfg.deinit();
+
+    core.spawnPtyShell(
+        self.alloc,
+        .{ .surface = from, .app = .{ .rt_app = from.rt_app, .mailbox = &self.mailbox } },
+        from.size,
+        &cfg,
+    ) catch |err| {
+        log.warn("corePtyStart spawn failed: {}", .{err});
+        return err;
+    };
+
+    from.renderer_state.mutex.lock();
+    from.renderer_state.terminal = core.getTerminalForViewing();
+    from.renderer_state.terminal.flags.dirty.clear = true;
+    from.renderer_state.mutex.unlock();
+    // 同步输入目标为该会话，实现“渲染+输入”统一
+    if (from.io_attach_target) |old| from.alloc.free(old);
+    from.io_attach_target = try from.alloc.dupe(u8, target_name);
     try from.queueRender();
 }
 
@@ -813,6 +845,12 @@ pub const Message = union(enum) {
     /// Detach current surface's input forwarding
     detach_io: struct {
         from_surface: *Surface,
+    },
+
+    /// Start SessionCore-owned PTY for a session, then rebind renderer to Core terminal
+    core_pty_start: struct {
+        from_surface: *Surface,
+        target: ?[]const u8 = null,
     },
 
     const NewWindow = struct {
