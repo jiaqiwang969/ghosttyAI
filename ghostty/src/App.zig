@@ -84,6 +84,8 @@ session_manager: SessionManager,
 
 /// 会话级重绘分发器（xev Loop + Async + Timer 合并）
 redraw_dispatcher: ?*SessionRedrawDispatcher = null,
+/// 提供给分发器使用的 App 邮箱（持久化句柄）
+dispatcher_mailbox: ?Mailbox = null,
 
 pub const CreateError = Allocator.Error || font.SharedGridSet.InitError;
 
@@ -117,6 +119,7 @@ pub fn init(
         .config_conditional_state = .{},
         .session_manager = SessionManager.init(alloc),
         .redraw_dispatcher = null,
+        .dispatcher_mailbox = null,
     };
 }
 
@@ -155,6 +158,15 @@ pub fn destroy(self: *App) void {
 pub fn tick(self: *App, rt_app: *apprt.App) !void {
     // Drain our mailbox
     try self.drainMailbox(rt_app);
+
+    // Lazy-init dispatcher once rt_app is available and we have a mailbox
+    if (self.redraw_dispatcher == null) {
+        var mb: Mailbox = .{ .rt_app = rt_app, .mailbox = &self.mailbox };
+        self.dispatcher_mailbox = mb;
+        const d = try SessionRedrawDispatcher.init(self.alloc, &self.dispatcher_mailbox.?, 8 * std.time.ns_per_ms);
+        try d.start();
+        self.redraw_dispatcher = d;
+    }
 }
 
 /// Update the configuration associated with the app. This can only be
