@@ -531,6 +531,9 @@ pub fn corePtyStart(self: *App, from: *Surface, target_opt: ?[]const u8) !void {
     var cfg = try @import("config.zig").Config.default(self.alloc);
     defer cfg.deinit();
 
+    // Force SessionCore cursor to bar (vertical beam) for this startup path
+    cfg.@"cursor-style" = @import("terminal/main.zig").CursorStyle.bar;
+
     core.spawnPtyShell(
         self.alloc,
         .{ .surface = from, .app = .{ .rt_app = from.rt_app, .mailbox = &self.mailbox } },
