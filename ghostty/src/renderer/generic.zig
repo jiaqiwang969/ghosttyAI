@@ -1165,23 +1165,19 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     try self.prepKittyGraphics(state.terminal);
                 }
 
-                // If we have any terminal dirty flags set then we need to rebuild
-                // the entire screen. This can be optimized in the future.
+                // Decide if we need a full rebuild. Prefer partial (row-level)
+                // rebuild whenever possible to reduce latency. On attach/switch,
+                // dirty.clear will be set to force a one-shot full rebuild.
                 const full_rebuild: bool = rebuild: {
-                    {
-                        const Int = @typeInfo(terminal.Terminal.Dirty).@"struct".backing_integer.?;
-                        const v: Int = @bitCast(state.terminal.flags.dirty);
-                        if (v > 0) break :rebuild true;
-                    }
-                    {
-                        const Int = @typeInfo(terminal.Screen.Dirty).@"struct".backing_integer.?;
-                        const v: Int = @bitCast(state.terminal.screen.dirty);
-                        if (v > 0) break :rebuild true;
-                    }
+                    // Heavy dirty conditions that affect the whole frame
+                    const td = state.terminal.flags.dirty;
+                    const sd = state.terminal.screen.dirty;
+                    if (td.palette or td.reverse_colors or td.clear) break :rebuild true;
+                    if (state.terminal.screen.kitty_images.dirty or self.image_virtual) break :rebuild true;
+                    // Hyperlink hover can span multiple lines — treat as full
+                    if (sd.hyperlink_hover) break :rebuild true;
 
-                    // If our viewport changed then we need to rebuild the entire
-                    // screen because it means we scrolled. If we have no previous
-                    // viewport then we must rebuild.
+                    // Viewport change implies scroll or major shift → full
                     const prev_viewport = self.cells_viewport orelse break :rebuild true;
                     if (!prev_viewport.eql(viewport_pin)) break :rebuild true;
 

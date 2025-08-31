@@ -163,7 +163,7 @@ pub fn tick(self: *App, rt_app: *apprt.App) !void {
     if (self.redraw_dispatcher == null) {
         const mb: Mailbox = .{ .rt_app = rt_app, .mailbox = &self.mailbox };
         self.dispatcher_mailbox = mb;
-        const d = try SessionRedrawDispatcher.init(self.alloc, &self.dispatcher_mailbox.?, 8 * std.time.ns_per_ms);
+        const d = try SessionRedrawDispatcher.init(self.alloc, &self.dispatcher_mailbox.?, &self.session_manager, 8 * std.time.ns_per_ms);
         try d.start();
         self.redraw_dispatcher = d;
     }
@@ -372,6 +372,8 @@ pub fn closeSurface(self: *App, surface: *Surface) void {
 pub fn focusSurface(self: *App, surface: *Surface) void {
     if (!self.hasSurface(surface)) return;
     self.focused_surface = surface;
+    // 通知 SessionManager 记录聚焦 viewer
+    self.session_manager.setFocusedSurface(surface);
 }
 
 fn redrawSurface(
@@ -426,6 +428,11 @@ pub fn getSessionName(self: *App, surface: *Surface) ?[]const u8 {
 
 /// 在当前 surface 上将渲染目标切换为目标会话对应 Surface 的 terminal 指针
 pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
+    // 若该 viewer 之前已附着到其他会话，先解除登记
+    if (self.session_manager.getSessionByPointer(from)) |_| {
+        self.session_manager.detachViewer(from);
+    }
+
     // 默认使用 SessionCore 渲染；若不可用则回退到 Surface 终端
     var used_core_path = false;
     core_path: {
@@ -454,6 +461,10 @@ pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
         from.renderer_state.terminal.flags.dirty.clear = true;
         from.renderer_state.mutex.unlock();
         log.info("attach-render via Surface terminal for {s}", .{target_name});
+
+        // 同步输入目标（即使走回退路径也保持与渲染一致的会话绑定）
+        if (from.io_attach_target) |old| from.alloc.free(old);
+        from.io_attach_target = try from.alloc.dupe(u8, target_name);
     }
 
     // 登记查看器附着关系（仅元数据）
@@ -461,18 +472,10 @@ pub fn attachRender(self: *App, from: *Surface, target_name: []const u8) !void {
         log.warn("attachViewer registry failed: {}", .{err});
     };
 
-    // 请求重绘
+    // 立即唤醒本地 renderer 线程，尽快显示切换结果
+    from.renderer_thread.wakeup.notify() catch {};
+    // 再请求重绘（本帧强制 full rebuild 由 dirty.clear=true 触发）
     try from.queueRender();
-
-    // 文本反馈
-    from.renderer_state.mutex.lock();
-    const t = from.renderer_state.terminal;
-    t.carriageReturn();
-    t.linefeed() catch {};
-    t.printString("[ghostty] attach-render -> ") catch {};
-    t.printString(target_name) catch {};
-    t.linefeed() catch {};
-    from.renderer_state.mutex.unlock();
 }
 
 /// 恢复本地渲染：让 from.surface 重新指向自身 io.terminal
@@ -486,15 +489,13 @@ pub fn attachRenderReset(self: *App, from: *Surface) !void {
     // 解除查看器附着登记
     self.session_manager.detachViewer(from);
 
-    try from.queueRender();
+    // 恢复本地输入绑定
+    if (from.io_attach_target) |old| {
+        from.alloc.free(old);
+        from.io_attach_target = null;
+    }
 
-    from.renderer_state.mutex.lock();
-    const t = from.renderer_state.terminal;
-    t.carriageReturn();
-    t.linefeed() catch {};
-    t.printString("[ghostty] detach-render -> local") catch {};
-    t.linefeed() catch {};
-    from.renderer_state.mutex.unlock();
+    try from.queueRender();
 }
 
 /// 读取布尔环境变量，true/1/yes/on 视为开启
@@ -517,20 +518,8 @@ pub fn attachIO(self: *App, from: *Surface, target_name: []const u8) !void {
     if (from.io_attach_target) |old| from.alloc.free(old);
     from.io_attach_target = try from.alloc.dupe(u8, target_name);
 
-    // 反馈
-    from.renderer_state.mutex.lock();
-    const t = from.renderer_state.terminal;
-    t.carriageReturn();
-    t.linefeed() catch {};
-    t.printString("[ghostty] attach-io -> ") catch {};
-    t.printString(target_name) catch {};
-    t.linefeed() catch {};
-    from.renderer_state.mutex.unlock();
-
-    // 轻量重绘
+    // 轻量重绘以反映状态变化（如有需要）
     try from.queueRender();
-
-    // no-op
 }
 
 /// 解除输入转发
@@ -540,14 +529,6 @@ pub fn detachIO(self: *App, from: *Surface) !void {
         from.alloc.free(old);
         from.io_attach_target = null;
     }
-
-    from.renderer_state.mutex.lock();
-    const t = from.renderer_state.terminal;
-    t.carriageReturn();
-    t.linefeed() catch {};
-    t.printString("[ghostty] detach-io -> local") catch {};
-    t.linefeed() catch {};
-    from.renderer_state.mutex.unlock();
     try from.queueRender();
 }
 
@@ -567,6 +548,7 @@ pub fn corePtyStart(self: *App, from: *Surface, target_opt: ?[]const u8) !void {
         .{ .surface = from, .app = .{ .rt_app = from.rt_app, .mailbox = &self.mailbox } },
         from.size,
         &cfg,
+        &self.session_manager,
     ) catch |err| {
         log.warn("corePtyStart spawn failed: {}", .{err});
         return err;

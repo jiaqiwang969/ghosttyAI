@@ -7,6 +7,7 @@ const renderer = @import("../renderer.zig");
 const Command = @import("../Command.zig");
 const Config = @import("../config.zig").Config;
 const termio = @import("../termio.zig");
+const SessionManager = @import("../terminal/SessionManager.zig");
 
 /// All size metrics for the terminal.
 size: renderer.Size,
@@ -41,6 +42,9 @@ renderer_mailbox: *renderer.Thread.Mailbox,
 
 /// The mailbox for sending the surface messages.
 surface_mailbox: apprt.surface.Mailbox,
+
+/// Optional: session manager for direct viewer notifications
+session_manager: ?*SessionManager = null,
 
 /// Optional session identifier used for app-level redraw broadcasting.
 /// When present, the IO handler may notify the App to redraw all viewers

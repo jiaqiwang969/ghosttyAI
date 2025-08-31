@@ -26,6 +26,7 @@ const internal_os = @import("../os/main.zig");
 const windows = internal_os.windows;
 const configpkg = @import("../config.zig");
 const shell_integration = @import("shell_integration.zig");
+const SessionManager = @import("../terminal/SessionManager.zig");
 
 const log = std.log.scoped(.io_exec);
 
@@ -55,6 +56,12 @@ renderer_mailbox: *renderer.Thread.Mailbox,
 
 /// The mailbox for communicating with the surface.
 surface_mailbox: apprt.surface.Mailbox,
+
+/// Optional session manager for direct viewer notifications
+session_manager: ?*SessionManager = null,
+
+/// IO thread xev loop pointer (set on threadEnter)
+io_loop: ?*xev.Loop = null,
 
 /// Optional session id for broadcasting redraws to all viewers.
 broadcast_session_id: ?[]const u8 = null,
@@ -374,6 +381,9 @@ pub fn threadEnter(
     try self.backend.threadEnter(self.alloc, self, data);
     errdefer self.backend.threadExit(data);
 
+    // Record IO loop
+    self.io_loop = &thread.loop;
+
     // If we have inputs, then queue them all up.
     for (inputs orelse &.{}) |input| switch (input) {
         .string => |v| self.queueWrite(data, v, false) catch |err| {
@@ -684,11 +694,25 @@ pub fn focusGained(self: *Termio, td: *ThreadData, focused: bool) !void {
 /// call with pty data but it is also called by the read thread when using
 /// an exec subprocess.
 pub fn processOutput(self: *Termio, buf: []const u8) void {
-    // We are modifying terminal state from here on out and we need
-    // the lock to grab our read data.
+    // Aggressive path: compute whether we should wake viewers, but
+    // perform the wake outside of the renderer_state lock to avoid
+    // renderer threads contending on the same mutex.
+    const sid_to_notify: ?[]const u8 = self.broadcast_session_id;
+    const can_notify = self.session_manager != null and sid_to_notify != null;
+
+    // Lock only for terminal mutation and parsing
     self.renderer_state.mutex.lock();
-    defer self.renderer_state.mutex.unlock();
     self.processOutputLocked(buf);
+    self.renderer_state.mutex.unlock();
+
+    // Wake viewers after unlocking to reduce lock contention latency
+    if (can_notify) {
+        if (self.session_manager) |sm| {
+            sm.notifyViewersWake(sid_to_notify.?);
+        } else {
+            _ = self.surface_mailbox.app.push(.{ .redraw_session = .{ .session = sid_to_notify.?, .own = false } }, .{ .instant = {} });
+        }
+    }
 }
 
 /// Process output from readdata but the lock is already held.
@@ -696,13 +720,13 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
     // Schedule a render. We can call this first because we have the lock.
     self.terminal_stream.handler.queueRender() catch unreachable;
 
-    // If broadcasting is enabled for this session, send a lightweight
-    // broadcast request to the app thread so it can wake all viewers.
+    // If broadcasting is enabled, notify viewers immediately（tmux-like server push）
     if (self.broadcast_session_id != null) {
-        // 改为交给会话级分发器（通过 App 邮箱处理 redraw_session）
-        _ = self.surface_mailbox.app.push(.{
-            .redraw_session = .{ .session = self.broadcast_session_id.?, .own = false },
-        }, .{ .instant = {} });
+        if (self.session_manager) |sm| {
+            sm.notifyViewersWake(self.broadcast_session_id.?);
+        } else {
+            _ = self.surface_mailbox.app.push(.{ .redraw_session = .{ .session = self.broadcast_session_id.?, .own = false } }, .{ .instant = {} });
+        }
     }
 
     // Whenever a character is typed, we ensure the cursor is in the
@@ -749,6 +773,8 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
         self.mailbox.notify();
     }
 }
+
+// removed: viewer wake timer; immediate push via SessionManager.notifyViewersWake
 
 /// ThreadData is the data created and stored in the termio thread
 /// when the thread is started and destroyed when the thread is

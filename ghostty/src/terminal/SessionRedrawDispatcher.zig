@@ -6,12 +6,15 @@ const Dispatcher = @This();
 const std = @import("std");
 const xev = @import("../global.zig").xev;
 const App = @import("../App.zig");
+const SessionManager = @import("SessionManager.zig");
+const Surface = @import("../Surface.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.session_redraw);
 
 /// App 邮箱句柄（跨线程安全）
 app_mailbox: *App.Mailbox,
+session_manager: *SessionManager,
 
 /// 事件循环
 loop: xev.Loop,
@@ -34,7 +37,7 @@ pending: std.StringHashMap(void),
 thread: ?std.Thread = null,
 alloc: Allocator,
 
-pub fn init(alloc: Allocator, app_mailbox: *App.Mailbox, coalesce_ns: u64) !*Dispatcher {
+pub fn init(alloc: Allocator, app_mailbox: *App.Mailbox, session_manager: *SessionManager, coalesce_ns: u64) !*Dispatcher {
     const self = try alloc.create(Dispatcher);
     errdefer alloc.destroy(self);
 
@@ -56,6 +59,7 @@ pub fn init(alloc: Allocator, app_mailbox: *App.Mailbox, coalesce_ns: u64) !*Dis
         .pending = std.StringHashMap(void).init(alloc),
         .thread = null,
         .alloc = alloc,
+        .session_manager = session_manager,
     };
 
     return self;
@@ -130,16 +134,25 @@ fn timerCallback(
 
     // 取出所有待处理的 session，向 App 投递 redraw_session 消息
     var it = self.pending.iterator();
-    var to_remove: usize = 0;
     while (it.next()) |entry| {
         const sid = entry.key_ptr.*; // owned by pending map
-        _ = self.app_mailbox.push(.{ .redraw_session = .{ .session = sid, .own = true } }, .{ .instant = {} });
-        to_remove += 1;
+        // 查 viewers 并直接唤醒其 renderer 线程，避免 App.render 路径
+        const viewers = self.session_manager.copyViewers(sid, self.alloc) catch |err| blk: {
+            log.warn("copyViewers failed: {}", .{err});
+            // 仍然尝试通过 App 广播兜底
+            _ = self.app_mailbox.push(.{ .redraw_session = .{ .session = sid, .own = false } }, .{ .instant = {} });
+            break :blk &[_]*anyopaque{};
+        };
+        defer self.alloc.free(viewers);
+        for (viewers) |vp| {
+            const v = @as(*Surface, @ptrCast(@alignCast(vp)));
+            v.renderer_thread.wakeup.notify() catch {};
+        }
+        // 释放我们复制的会话键
+        self.alloc.free(sid);
     }
-    // 移除已投递的键（避免二次释放）
-    if (to_remove > 0) {
-        self.pending.clearRetainingCapacity();
-    }
+    // 清空 pending
+    self.pending.clearRetainingCapacity();
 
     return .disarm;
 }

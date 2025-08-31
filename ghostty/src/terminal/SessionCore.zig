@@ -12,6 +12,7 @@ const renderer = @import("../renderer.zig");
 const xev = @import("../global.zig").xev;
 const configpkg = @import("../config.zig");
 const Command = @import("../Command.zig");
+const SessionManager = @import("SessionManager.zig");
 const internal_os = @import("../os/main.zig");
 const global_state = &@import("../global.zig").state;
 
@@ -91,6 +92,7 @@ pub fn spawnPtyShell(
     surface_mailbox: @import("../apprt.zig").surface.Mailbox,
     size: renderer.Size,
     full_config: *const @import("../config.zig").Config,
+    session_manager: *SessionManager,
 ) !void {
     // Only early-return if Core already owns a PTY (io != null). If has_pty
     // is true due to adoptExistingTerminal, we still want to spawn our own PTY
@@ -151,6 +153,7 @@ pub fn spawnPtyShell(
         .renderer_wakeup = self.renderer_wakeup_core.?,
         .renderer_mailbox = self.renderer_mailbox_core.?,
         .surface_mailbox = surface_mailbox,
+        .session_manager = session_manager,
         .broadcast_session_id = self.id,
     });
 

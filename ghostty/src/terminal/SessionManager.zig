@@ -61,6 +61,9 @@ next_auto_id: u32,  // For auto-generated names
 viewers: ViewersMap,
 viewer_pointer_map: ViewerPointerMap,
 
+// 当前聚焦的 Surface 指针（用于聚焦优先唤醒）
+focused_surface_ptr: ?*anyopaque = null,
+
 pub fn init(allocator: Allocator) SessionManager {
     return .{
         .allocator = allocator,
@@ -73,6 +76,7 @@ pub fn init(allocator: Allocator) SessionManager {
         .next_auto_id = 0,
         .viewers = ViewersMap.init(allocator),
         .viewer_pointer_map = ViewerPointerMap.init(allocator),
+        .focused_surface_ptr = null,
     };
 }
 
@@ -240,7 +244,7 @@ pub fn copyViewers(
     self: *SessionManager,
     id: []const u8,
     alloc: Allocator,
-) ![]*anyopaque {
+) Allocator.Error![]*anyopaque {
     self.mutex.lock();
     defer self.mutex.unlock();
 
@@ -249,6 +253,21 @@ pub fn copyViewers(
     const out = try alloc.alloc(*anyopaque, list_opt.items.len);
     @memcpy(out, list_opt.items);
     return out;
+}
+
+/// 仅检查是否存在 viewer（无分配），需持锁
+pub fn hasViewers(self: *SessionManager, id: []const u8) bool {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    const list_opt = self.viewers.get(id) orelse return false;
+    return list_opt.items.len > 0;
+}
+
+/// 无锁只读快路径：仅用于 IO 线程的“是否存在 viewer”查询
+/// 注意：可能与并发写有竞态，仅用于优化，不依赖强一致
+pub fn hasViewersUnlockedHint(self: *SessionManager, id: []const u8) bool {
+    const list_opt = self.viewers.get(id) orelse return false;
+    return list_opt.items.len > 0;
 }
 
 /// 获取/创建 SessionCore
@@ -292,8 +311,10 @@ pub fn attachViewer(self: *SessionManager, session_id: []const u8, viewer_surfac
         break :blk self.viewers.getPtr(sid_copy).?;
     };
 
-    // Append viewer to list
-    try list_ptr.append(self.allocator, viewer_surface);
+    // Append viewer to list（去重）
+    var exists = false;
+    for (list_ptr.items) |p| { if (p == viewer_surface) { exists = true; break; } }
+    if (!exists) try list_ptr.append(self.allocator, viewer_surface);
     // Update maps
     try self.viewer_pointer_map.put(@intFromPtr(viewer_surface), try self.allocator.dupe(u8, session_id));
 }
@@ -319,6 +340,52 @@ pub fn detachViewer(self: *SessionManager, viewer_surface: *anyopaque) void {
             self.allocator.free(session_id);
         }
     }
+}
+
+/// 遍历并唤醒指定会话的所有 viewers；若有聚焦 viewer 则先唤醒它
+pub fn notifyViewersWake(self: *SessionManager, session_id: []const u8) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    const list = self.viewers.get(session_id) orelse return;
+
+    // Focus-first
+    const focused = self.focused_surface_ptr;
+    if (focused) |fp| {
+        if (self.viewer_pointer_map.get(@intFromPtr(fp))) |sid| {
+            if (std.mem.eql(u8, sid, session_id)) {
+                const fs = @as(*@import("../Surface.zig"), @ptrCast(@alignCast(fp)));
+                fs.renderer_thread.wakeup.notify() catch {};
+            }
+        }
+    }
+
+    // Then others
+    var i: usize = 0;
+    while (i < list.items.len) : (i += 1) {
+        const vp = list.items[i];
+        if (focused) |fp| { if (vp == fp) continue; }
+        const surf = @as(*@import("../Surface.zig"), @ptrCast(@alignCast(vp)));
+        surf.renderer_thread.wakeup.notify() catch {};
+    }
+}
+
+/// 设置当前聚焦的 Surface 指针
+pub fn setFocusedSurface(self: *SessionManager, surface_ptr: *anyopaque) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    self.focused_surface_ptr = surface_ptr;
+}
+
+/// 若聚焦的 Surface 附着在给定会话上，则返回该聚焦 Surface 指针
+pub fn getFocusedViewer(self: *SessionManager, session_id: []const u8) ?*anyopaque {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    const focused = self.focused_surface_ptr orelse return null;
+    if (self.viewer_pointer_map.get(@intFromPtr(focused))) |sid| {
+        if (std.mem.eql(u8, sid, session_id)) return focused;
+    }
+    return null;
 }
 
 /// 发送消息到指定会话
