@@ -278,7 +278,18 @@ fn drainMailbox(self: *App, rt_app: *apprt.App) !void {
             .open_config => try self.performAction(rt_app, .open_config),
             .new_window => |msg| try self.newWindow(rt_app, msg),
             .close => |surface| self.closeSurface(surface),
-            .surface_message => |msg| try self.surfaceMessage(msg.surface, msg.message),
+            .surface_message => |msg| blk: {
+                // Intercept broadcast_redraw to perform App-level multi-viewer redraw
+                switch (msg.message) {
+                    .broadcast_redraw => {
+                        self.broadcastRedrawForSurface(rt_app, msg.surface) catch |err| {
+                            log.warn("broadcastRedrawForSurface failed: {}", .{err});
+                        };
+                        break :blk;
+                    },
+                    else => try self.surfaceMessage(msg.surface, msg.message),
+                }
+            },
             .redraw_surface => |surface| try self.redrawSurface(rt_app, surface),
             .redraw_inspector => |surface| self.redrawInspector(rt_app, surface),
             .send_to_session => |msg| {
@@ -747,6 +758,26 @@ pub fn performAllAction(
                 });
             };
         },
+    }
+}
+
+/// Broadcast redraw to all viewers attached to the same session as this surface.
+fn broadcastRedrawForSurface(self: *App, rt_app: *apprt.App, surface: *Surface) !void {
+    const session_name = self.session_manager.getSessionByPointer(surface) orelse return;
+    const viewers = self.session_manager.copyViewers(session_name, self.alloc) catch return;
+    defer self.alloc.free(viewers);
+
+    // If no viewers registered, redraw this surface only as a fallback
+    if (viewers.len == 0) {
+        _ = try rt_app.performAction(.{ .surface = surface }, .render, {});
+        return;
+    }
+
+    // Redraw all viewers
+    for (viewers) |vp| {
+        const v = @as(*Surface, @ptrCast(@alignCast(vp)));
+        if (!self.hasSurface(v)) continue;
+        _ = try rt_app.performAction(.{ .surface = v }, .render, {});
     }
 }
 
