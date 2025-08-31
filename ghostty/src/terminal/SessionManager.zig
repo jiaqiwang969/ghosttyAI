@@ -246,7 +246,7 @@ pub fn copyViewers(
 
     const list_opt = self.viewers.get(id) orelse return &[_]*anyopaque{};
     if (list_opt.items.len == 0) return &[_]*anyopaque{};
-    var out = try alloc.alloc(*anyopaque, list_opt.items.len);
+    const out = try alloc.alloc(*anyopaque, list_opt.items.len);
     @memcpy(out, list_opt.items);
     return out;
 }
